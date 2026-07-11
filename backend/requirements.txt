@@ -1,0 +1,22 @@
+# AgentBruce
+# Core Framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
+# PostgreSQL (async + sync)
+sqlalchemy[asyncio]>=2.0.30
+asyncpg>=0.30.0
+psycopg2-binary>=2.9.9
+
+# Neo4j
+neo4j>=5.20.0
+
+# Qdrant
+qdrant-client>=1.9.0
+
+# Redis
+redis[hiredis]>=5.0.0
+
+# Configuration
+pydantic-settings>=2.3.0
+python-dotenv>=1.0.0

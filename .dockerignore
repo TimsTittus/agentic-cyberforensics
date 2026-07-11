@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+.venv
+__pycache__
+*.pyc
+*.pyo
+node_modules
+.next
+*.md
+.dockerignore
+docker-compose.yml

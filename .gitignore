@@ -1,0 +1,22 @@
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+
+# IDE
+.vscode/
+.idea/
+
+# Docker volumes (local)
+postgres_data/
+neo4j_data/
+qdrant_data/
+redis_data/
