@@ -20,3 +20,12 @@ redis[hiredis]>=5.0.0
 # Configuration
 pydantic-settings>=2.3.0
 python-dotenv>=1.0.0
+
+# Async file I/O
+aiofiles>=24.1.0
+
+# Multipart file uploads
+python-multipart>=0.0.9
+
+# Celery task queue
+celery[redis]>=5.4.0

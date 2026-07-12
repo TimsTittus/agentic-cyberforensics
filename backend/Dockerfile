@@ -25,7 +25,7 @@ COPY --from=builder /install /usr/local
 
 COPY . .
 
-RUN chown -R bruce:bruce /app
+RUN mkdir -p /app/storage && chown -R bruce:bruce /app
 USER bruce
 
 EXPOSE 8000
