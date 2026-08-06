@@ -29,3 +29,15 @@ python-multipart>=0.0.9
 
 # Celery task queue
 celery[redis]>=5.4.0
+
+# ML Extraction Pipeline
+torch
+ultralytics
+easyocr
+openai-whisper
+Pillow
+exifread
+
+# Testing
+pytest
+pytest-asyncio

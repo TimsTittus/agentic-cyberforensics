@@ -91,6 +91,7 @@ services:
       - "8000:8000"
     volumes:
       - ./backend/app:/app/app
+      - evidence_storage:/app/storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -99,6 +100,26 @@ services:
       qdrant:
         condition: service_healthy
       redis:
+        condition: service_healthy
+    networks:
+      - bruce_network
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: bruce_celery_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["celery", "-A", "app.core.celery_app", "worker", "--loglevel=info", "-Q", "evidence"]
+    volumes:
+      - ./backend/app:/app/app
+      - evidence_storage:/app/storage
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     networks:
       - bruce_network
@@ -121,6 +142,7 @@ volumes:
   neo4j_plugins:
   qdrant_data:
   redis_data:
+  evidence_storage:
 
 networks:
   bruce_network:

@@ -17,7 +17,7 @@ from sqlalchemy import (
     String,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -29,6 +29,7 @@ from sqlalchemy.orm import (
 class Base(DeclarativeBase):
     """Declarative base for all ORM models."""
     pass
+
 
 
 class Case(Base):
@@ -122,6 +123,10 @@ class Evidence(Base):
         String(50),
         default="pending",
         server_default="pending",
+    )
+    extracted_data: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
     )
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
