@@ -3,15 +3,11 @@ from langgraph.graph import StateGraph, START, END
 from app.agents.state import InvestigationState
 from app.agents.specialized.grooming import grooming_agent
 from app.agents.specialized.multimedia import multimedia_agent
+from app.agents.specialized.osint import osint_agent
+from app.agents.specialized.synthetic import synthetic_agent
 
-# Dummy node functions returning unmodified state for remaining agents
+# Dummy node functions returning unmodified state for remaining downstream agents
 def gateway(state: InvestigationState) -> Dict[str, Any]:
-    return {}
-
-def synthetic_agent(state: InvestigationState) -> Dict[str, Any]:
-    return {}
-
-def osint_agent(state: InvestigationState) -> Dict[str, Any]:
     return {}
 
 def timeline_agent(state: InvestigationState) -> Dict[str, Any]:
