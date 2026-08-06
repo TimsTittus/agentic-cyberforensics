@@ -2,6 +2,8 @@
 # Core Framework
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
+langgraph
+langchain-core
 
 # PostgreSQL (async + sync)
 sqlalchemy[asyncio]>=2.0.30
