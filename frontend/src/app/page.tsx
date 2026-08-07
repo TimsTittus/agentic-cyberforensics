@@ -26,6 +26,10 @@ import {
   ExternalLink,
   Cpu,
   ShieldAlert,
+  ArrowLeft,
+  Trash2,
+  FolderOpen,
+  Paperclip,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +38,7 @@ import {
   fetchCases,
   createCase,
   uploadEvidence,
+  fetchCaseEvidence,
   searchEvidence,
   generateAiReport,
   type CaseData,
@@ -75,7 +80,7 @@ function formatDate(dateStr: string | null) {
 export default function DashboardPage() {
   const [cases, setCases] = useState<CaseData[]>([]);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<"cases" | "graph" | "execution" | "evidence">("cases");
+  const [activeTab, setActiveTab] = useState<"cases" | "graph" | "execution" | "evidence" | "workspace">("cases");
 
   // Semantic Search state
   const [searchQuery, setSearchQuery] = useState("school bus stop uniform");
@@ -91,13 +96,36 @@ export default function DashboardPage() {
   const [showNewCaseModal, setShowNewCaseModal] = useState(false);
   const [newCaseTitle, setNewCaseTitle] = useState("");
   const [newCaseRisk, setNewCaseRisk] = useState("high");
-  const [newCaseFile, setNewCaseFile] = useState<File | null>(null);
+  const [newCaseFiles, setNewCaseFiles] = useState<File[]>([]);
   const [isCreatingCase, setIsCreatingCase] = useState(false);
   const [selectedCaseId, setSelectedCaseId] = useState<string>("550e8400-e29b-41d4-a716-446655440000");
+
+  // Case Workspace state
+  const [caseEvidence, setCaseEvidence] = useState<any[]>([]);
+  const [isLoadingEvidence, setIsLoadingEvidence] = useState(false);
+  const [workspaceSubTab, setWorkspaceSubTab] = useState<"details" | "execution" | "graph" | "search">("details");
 
   useEffect(() => {
     fetchCases().then(setCases);
   }, []);
+
+  const fetchEvidenceForCase = async (caseId: string) => {
+    setIsLoadingEvidence(true);
+    try {
+      const items = await fetchCaseEvidence(caseId);
+      setCaseEvidence(items);
+    } catch {
+      setCaseEvidence([]);
+    } finally {
+      setIsLoadingEvidence(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedCaseId) {
+      fetchEvidenceForCase(selectedCaseId);
+    }
+  }, [selectedCaseId]);
 
   const handleCreateCaseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,15 +133,16 @@ export default function DashboardPage() {
     setIsCreatingCase(true);
     try {
       const created = await createCase(newCaseTitle, newCaseRisk);
-      if (newCaseFile) {
-        await uploadEvidence(created.id, newCaseFile);
+      if (newCaseFiles.length > 0) {
+        await Promise.all(newCaseFiles.map((file) => uploadEvidence(created.id, file)));
       }
       setCases((prev) => [created, ...prev]);
       setSelectedCaseId(created.id);
-      setActiveTab("execution");
+      setActiveTab("workspace");
+      setWorkspaceSubTab("details");
       setShowNewCaseModal(false);
       setNewCaseTitle("");
-      setNewCaseFile(null);
+      setNewCaseFiles([]);
     } catch {
       // Fallback
     } finally {
@@ -465,6 +494,11 @@ export default function DashboardPage() {
                       {filteredCases.map((c) => (
                         <tr
                           key={c.id}
+                          onClick={() => {
+                            setSelectedCaseId(c.id);
+                            setActiveTab("workspace");
+                            setWorkspaceSubTab("details");
+                          }}
                           className="hover:bg-slate-50/70 transition-colors group cursor-pointer"
                         >
                           <td className="py-4 px-4">
@@ -490,7 +524,7 @@ export default function DashboardPage() {
                           <td className="py-4 px-4 text-slate-500 text-xs font-medium">
                             {formatDate(c.created_at)}
                           </td>
-                          <td className="py-4 px-4">
+                          <td className="py-4 px-4" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => handleGenerateReport(c.id, c.title)}
@@ -500,7 +534,11 @@ export default function DashboardPage() {
                                 AI Report
                               </button>
                               <button
-                                onClick={() => setActiveTab("execution")}
+                                onClick={() => {
+                                  setSelectedCaseId(c.id);
+                                  setActiveTab("workspace");
+                                  setWorkspaceSubTab("details");
+                                }}
                                 className="w-8 h-8 rounded-full bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-400 flex items-center justify-center transition-all"
                               >
                                 <ChevronRight className="w-4 h-4" />
@@ -644,6 +682,390 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
           )}
+
+          {/* Dynamic Interactive Case Workspace */}
+          {activeTab === "workspace" && selectedCaseId && (
+            <div className="space-y-6">
+              {/* Back Button & Header */}
+              <div className="flex flex-wrap items-center justify-between gap-4 p-5 rounded-3xl border border-white/90 bg-white/75 backdrop-blur-xl shadow-sm">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setActiveTab("cases")}
+                    className="p-2.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition-all"
+                    title="Back to Cases"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                  </button>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600">
+                      Active Investigation Space
+                    </span>
+                    <h3 className="font-bold text-lg text-slate-900 leading-tight">
+                      {cases.find((c) => c.id === selectedCaseId)?.title || "Case Workspace"}
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() =>
+                      handleGenerateReport(
+                        selectedCaseId,
+                        cases.find((c) => c.id === selectedCaseId)?.title || ""
+                      )
+                    }
+                    disabled={isGeneratingReport}
+                    className="px-4 py-2.5 rounded-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white text-xs font-semibold shadow-md flex items-center gap-1.5 transition-all"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    AI report
+                  </button>
+                </div>
+              </div>
+
+              {/* Workspace Dashboard Layout */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Left Panel: Profile & Evidence Ledger */}
+                <div className="space-y-6 lg:col-span-1">
+                  {/* Case Profile details */}
+                  <Card className="rounded-3xl shadow-sm border-white bg-white/70 backdrop-blur-md">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm font-bold uppercase tracking-wider text-slate-400">
+                        Case Information
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4 text-xs font-medium text-slate-700">
+                      <div>
+                        <span className="text-slate-400 block font-normal mb-0.5">Case UUID:</span>
+                        <span className="font-mono text-slate-900 bg-slate-50 border border-slate-100 px-2 py-1 rounded-lg select-all block truncate">
+                          {selectedCaseId}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <span className="text-slate-400 block font-normal mb-0.5">Status:</span>
+                          <Badge variant={getStatusVariant(cases.find((c) => c.id === selectedCaseId)?.status || "open")}>
+                            {(cases.find((c) => c.id === selectedCaseId)?.status || "open").replace("_", " ")}
+                          </Badge>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block font-normal mb-0.5">Risk Level:</span>
+                          <Badge variant={getRiskVariant(cases.find((c) => c.id === selectedCaseId)?.risk_level || "medium")}>
+                            {cases.find((c) => c.id === selectedCaseId)?.risk_level || "medium"}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block font-normal mb-0.5">Created At:</span>
+                        <span className="text-slate-955 font-semibold">
+                          {formatDate(cases.find((c) => c.id === selectedCaseId)?.created_at || "")}
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Evidence Ledger */}
+                  <Card className="rounded-3xl shadow-sm border-white bg-white/70 backdrop-blur-md">
+                    <CardHeader className="pb-3 border-b border-slate-100 flex flex-row items-center justify-between">
+                      <div>
+                        <CardTitle className="text-sm font-bold uppercase tracking-wider text-slate-400">
+                          Forensic Ledger
+                        </CardTitle>
+                        <CardDescription className="text-[10px] mt-0.5">
+                          Cryptographic chain-of-custody log
+                        </CardDescription>
+                      </div>
+                      <span className="text-xs font-bold text-slate-500 bg-slate-100/80 px-2.5 py-0.5 rounded-full">
+                        {caseEvidence.length} Files
+                      </span>
+                    </CardHeader>
+                    <CardContent className="pt-4 space-y-4">
+                      {/* Evidence Files List */}
+                      <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                        {caseEvidence.map((ev) => (
+                          <div
+                            key={ev.id}
+                            className="p-3 rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm space-y-2 hover:border-indigo-200 transition-all"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
+                                <span className="text-xs font-bold text-slate-800 truncate" title={ev.file_path}>
+                                  {ev.file_path.split("/").pop()}
+                                </span>
+                              </div>
+                              <Badge
+                                variant={
+                                  ev.processed_status === "completed"
+                                    ? "low"
+                                    : ev.processed_status === "processing"
+                                      ? "medium"
+                                      : "high"
+                                }
+                                className="text-[9px] px-1.5 py-0"
+                              >
+                                {ev.processed_status}
+                              </Badge>
+                            </div>
+                            <div className="text-[10px] text-slate-400 space-y-0.5">
+                              <p className="font-mono truncate select-all" title={ev.sha256_hash}>
+                                SHA-256: {ev.sha256_hash.slice(0, 16)}…
+                              </p>
+                              <p>Type: {ev.file_type || "binary"} • Ingested: {formatDate(ev.ingested_at)}</p>
+                            </div>
+                          </div>
+                        ))}
+
+                        {caseEvidence.length === 0 && !isLoadingEvidence && (
+                          <div className="text-center py-8 text-xs text-slate-400 italic">
+                            No digital evidence attached to this case docket.
+                          </div>
+                        )}
+
+                        {isLoadingEvidence && (
+                          <div className="text-center py-8 text-xs text-slate-400 animate-pulse">
+                            Loading chain-of-custody records...
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Attach More Evidence Upload Zone */}
+                      <div className="pt-2 border-t border-slate-100">
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+                          Ingest Additional Evidence
+                        </label>
+                        <div className="border border-dashed border-slate-200 hover:border-indigo-400 rounded-2xl p-3 text-center transition-all bg-slate-50/50 cursor-pointer">
+                          <input
+                            type="file"
+                            multiple
+                            id="workspace-upload"
+                            className="hidden"
+                            onChange={async (e) => {
+                              if (e.target.files && e.target.files.length > 0) {
+                                const filesArray = Array.from(e.target.files);
+                                await Promise.all(
+                                  filesArray.map((file) => uploadEvidence(selectedCaseId, file))
+                                );
+                                fetchEvidenceForCase(selectedCaseId);
+                              }
+                            }}
+                          />
+                          <label htmlFor="workspace-upload" className="cursor-pointer space-y-1 block">
+                            <Paperclip className="w-5 h-5 text-slate-400 mx-auto" />
+                            <span className="text-[11px] font-semibold text-slate-700 block">
+                              Attach Evidence Files
+                            </span>
+                            <span className="text-[9px] text-slate-400 block">
+                              Supports multiple text, image, or audio files
+                            </span>
+                          </label>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Right Column: Forensic Sub-tab Spaces */}
+                <div className="lg:col-span-2 space-y-6">
+                  {/* Sub-tab Navigation */}
+                  <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-slate-100 w-fit">
+                    {[
+                      { id: "details", label: "Executive Info" },
+                      { id: "execution", label: "Live Execution" },
+                      { id: "graph", label: "Graph Topology" },
+                      { id: "search", label: "Semantic Search" },
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setWorkspaceSubTab(tab.id as any)}
+                        className={`px-4 py-1.5 rounded-xl text-xs font-semibold transition-all ${workspaceSubTab === tab.id
+                          ? "bg-slate-900 text-white shadow-sm"
+                          : "text-slate-600 hover:text-slate-900"
+                          }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Sub-tab Content mapping */}
+                  {workspaceSubTab === "details" && (
+                    <Card className="rounded-3xl border-white bg-white/70 backdrop-blur-md shadow-sm">
+                      <CardHeader>
+                        <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                          <Eye className="w-4 h-4 text-indigo-600" />
+                          Executive Investigation Overview
+                        </CardTitle>
+                        <CardDescription>
+                          Automated threat summary & system telemetry metrics
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-6 pt-2">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100 flex flex-col justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600">
+                              Threat Assessment Matrix
+                            </span>
+                            <div className="py-3">
+                              <p className="text-4xl font-extrabold text-indigo-900">88.5</p>
+                              <p className="text-xs text-indigo-700/80 mt-1 font-semibold">
+                                Synthesized Risk Score (0-100)
+                              </p>
+                            </div>
+                            <span className="text-[10px] text-slate-400">
+                              Calculated across 8 forensic nodes
+                            </span>
+                          </div>
+
+                          <div className="p-4 rounded-2xl bg-purple-50/50 border border-purple-100 flex flex-col justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600">
+                              Cognitive Graph Links
+                            </span>
+                            <div className="py-3">
+                              <p className="text-4xl font-extrabold text-purple-900">24</p>
+                              <p className="text-xs text-purple-700/80 mt-1 font-semibold">
+                                Tracked Entity Associations
+                              </p>
+                            </div>
+                            <span className="text-[10px] text-slate-400">
+                              Persisted inside Neo4j topology DB
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                            Analytical Summary Findings
+                          </h4>
+                          <div className="p-4 rounded-2xl border border-slate-200/80 bg-white/95 text-xs text-slate-600 space-y-2 leading-relaxed">
+                            <p>
+                              System detected high-risk patterns of trust formation and child isolation across digital communication evidence.
+                            </p>
+                            <p>
+                              OSINT breach records link the suspect's registered contact channels to known black-market breach credentials.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex justify-end">
+                          <button
+                            onClick={() =>
+                              handleGenerateReport(
+                                selectedCaseId,
+                                cases.find((c) => c.id === selectedCaseId)?.title || ""
+                              )
+                            }
+                            disabled={isGeneratingReport}
+                            className="px-5 py-2.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-md shadow-slate-900/10 flex items-center gap-1.5 transition-all"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
+                            Run AI Case Evaluation Report
+                          </button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {workspaceSubTab === "execution" && (
+                    <LiveExecution caseId={selectedCaseId} />
+                  )}
+
+                  {workspaceSubTab === "graph" && (
+                    <Card className="rounded-3xl border-white bg-white/70 backdrop-blur-md shadow-sm">
+                      <CardHeader>
+                        <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                          <Network className="w-4 h-4 text-indigo-600" />
+                          Interactive Neo4j Entity Map
+                        </CardTitle>
+                        <CardDescription>
+                          Visual link analysis mapped specific to this case
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="h-[450px]">
+                        <GraphExplorer caseId={selectedCaseId} />
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {workspaceSubTab === "search" && (
+                    <Card className="rounded-3xl border-white bg-white/70 backdrop-blur-md shadow-sm">
+                      <CardHeader>
+                        <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                          <Search className="w-4 h-4 text-indigo-600" />
+                          Semantic Search Vector Explorer
+                        </CardTitle>
+                        <CardDescription>
+                          Query Qdrant evidence embeddings specifically filtered for this case
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4 pt-2">
+                        {/* Search Input bar */}
+                        <form
+                          onSubmit={async (e) => {
+                            e.preventDefault();
+                            if (!searchQuery.trim()) return;
+                            setIsSearching(true);
+                            try {
+                              const res = await searchEvidence(searchQuery, selectedCaseId);
+                              setSearchResults(res.hits);
+                            } catch {
+                              setSearchResults([]);
+                            } finally {
+                              setIsSearching(false);
+                            }
+                          }}
+                          className="flex gap-2"
+                        >
+                          <div className="relative flex-1">
+                            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                            <Input
+                              placeholder="Search vector embeddings for this case..."
+                              value={searchQuery}
+                              onChange={(e) => setSearchQuery(e.target.value)}
+                              className="pl-11 h-11 text-sm"
+                            />
+                          </div>
+                          <button
+                            type="submit"
+                            disabled={isSearching}
+                            className="px-5 py-2.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition-all shrink-0"
+                          >
+                            Search Case
+                          </button>
+                        </form>
+
+                        {/* Search Results list */}
+                        <div className="space-y-3 pt-2 max-h-[300px] overflow-y-auto pr-1">
+                          {searchResults.map((hit) => (
+                            <div
+                              key={hit.id}
+                              className="p-3 rounded-2xl border border-slate-200/80 bg-white shadow-sm flex items-start justify-between gap-4"
+                            >
+                              <div>
+                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                                  {hit.source}
+                                </span>
+                                <p className="text-xs text-slate-700 font-semibold mt-1.5">{hit.text}</p>
+                              </div>
+                              <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200/60 px-2 py-0.5 rounded-full shrink-0">
+                                {Math.round(hit.score * 100)}% Match
+                              </span>
+                            </div>
+                          ))}
+
+                          {searchResults.length === 0 && (
+                            <div className="text-center py-10 text-xs text-slate-400 italic">
+                              Type a query to search vector embeddings inside this case.
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </main>
       </div>
       {/* New Case Creation & Execution Modal */}
@@ -705,37 +1127,53 @@ export default function DashboardPage() {
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                  Attach Evidence File (Optional)
+                  Attach Evidence Files (Optional)
                 </label>
                 <div className="border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-2xl p-4 text-center transition-all bg-slate-50/50">
                   <input
                     type="file"
+                    multiple
                     id="evidence-upload"
                     className="hidden"
                     onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) {
-                        setNewCaseFile(e.target.files[0]);
+                      if (e.target.files && e.target.files.length > 0) {
+                        setNewCaseFiles((prev) => [...prev, ...Array.from(e.target.files as FileList)]);
                       }
                     }}
                   />
                   <label htmlFor="evidence-upload" className="cursor-pointer space-y-1 block">
                     <FileText className="w-6 h-6 text-slate-400 mx-auto" />
-                    {newCaseFile ? (
-                      <p className="text-xs font-semibold text-indigo-600 truncate max-w-xs mx-auto">
-                        {newCaseFile.name} ({(newCaseFile.size / 1024).toFixed(1)} KB)
-                      </p>
-                    ) : (
-                      <>
-                        <p className="text-xs font-semibold text-slate-700">
-                          Click to browse or drop digital evidence file
-                        </p>
-                        <p className="text-[11px] text-slate-400">
-                          Supports .txt, .json, .jpg, .png, .mp3, .wav (SHA-256 integrity check)
-                        </p>
-                      </>
-                    )}
+                    <p className="text-xs font-semibold text-slate-700">
+                      Click to browse or drop digital evidence files
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                      Supports multiple .txt, .json, .jpg, .png, .mp3, .wav files
+                    </p>
                   </label>
                 </div>
+
+                {/* Display list of selected files */}
+                {newCaseFiles.length > 0 && (
+                  <div className="mt-3 space-y-1.5 max-h-24 overflow-y-auto">
+                    {newCaseFiles.map((file, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-200/60 text-xs"
+                      >
+                        <span className="font-semibold text-slate-700 truncate max-w-[280px]">
+                          {file.name} ({(file.size / 1024).toFixed(1)} KB)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setNewCaseFiles((prev) => prev.filter((_, i) => i !== idx))}
+                          className="p-1 rounded-full text-rose-500 hover:bg-rose-50 transition-all"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">

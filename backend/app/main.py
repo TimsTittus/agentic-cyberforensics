@@ -13,6 +13,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.v1.cases import router as cases_router
@@ -88,6 +89,15 @@ app = FastAPI(
     version=settings.APP_VERSION,
     description="Agentic Cyberforensics Investigation Operating System",
     lifespan=lifespan,
+)
+
+# CORS Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Mount API routers

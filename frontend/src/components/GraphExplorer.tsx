@@ -18,7 +18,7 @@ interface LinkObject {
   label: string;
 }
 
-export default function GraphExplorer() {
+export default function GraphExplorer({ caseId }: { caseId?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [graphData, setGraphData] = useState<{ nodes: NodeObject[]; links: LinkObject[] }>({
     nodes: [],
@@ -35,7 +35,7 @@ export default function GraphExplorer() {
   }, []);
 
   useEffect(() => {
-    fetchGraphData().then((data: GraphData) => {
+    fetchGraphData(caseId).then((data: GraphData) => {
       // Map node colors to bright harmonious palette suitable for clean light canvas
       const lightNodeColors: Record<string, string> = {
         Suspect: "#f43f5e",
@@ -54,7 +54,7 @@ export default function GraphExplorer() {
         links: data.links.map((l) => ({ ...l })),
       });
     });
-  }, []);
+  }, [caseId]);
 
   useEffect(() => {
     const updateDimensions = () => {

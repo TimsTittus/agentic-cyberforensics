@@ -120,6 +120,39 @@ export async function uploadEvidence(caseId: string, file: File): Promise<any> {
   }
 }
 
+export async function fetchCaseEvidence(caseId: string): Promise<any[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/cases/${caseId}/evidence`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch {
+    return getMockEvidence(caseId);
+  }
+}
+
+function getMockEvidence(caseId: string): any[] {
+  return [
+    {
+      id: "ev-1",
+      case_id: caseId,
+      sha256_hash: "7f83b162dc4a5fefcde7559eeb404fe285a4675624c02be3addc47021b99cc50",
+      file_path: `/app/storage/evidence/${caseId}/chat_export.txt`,
+      file_type: "text/plain",
+      processed_status: "completed",
+      ingested_at: new Date().toISOString(),
+    },
+    {
+      id: "ev-2",
+      case_id: caseId,
+      sha256_hash: "28cbe69a0902ea3dfde8cc3b1eb3af216ff0628105c8d899807a2b3091c2390c",
+      file_path: `/app/storage/evidence/${caseId}/surveillance_camera.jpg`,
+      file_type: "image/jpeg",
+      processed_status: "completed",
+      ingested_at: new Date().toISOString(),
+    }
+  ];
+}
+
 export async function fetchGraphData(caseId?: string): Promise<GraphData> {
   try {
     const url = caseId

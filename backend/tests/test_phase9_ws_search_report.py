@@ -1,12 +1,12 @@
 import os
 
-os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://bruce:bruceforensics@localhost:5432/agentbruce")
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://bruce:bruceforensics@localhost:5435/agentbruce")
 os.environ.setdefault("NEO4J_URI", "bolt://localhost:7687")
 os.environ.setdefault("NEO4J_USER", "neo4j")
 os.environ.setdefault("NEO4J_PASSWORD", "bruceforensics")
 os.environ.setdefault("QDRANT_HOST", "localhost")
 os.environ.setdefault("QDRANT_PORT", "6333")
-os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("REDIS_URL", "redis://localhost:6381/0")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-12345678901234567890")
 
 import pytest
@@ -14,11 +14,10 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 
-
 @pytest.fixture
 def client():
-    return TestClient(app)
-
+    with TestClient(app) as c:
+        yield c
 
 def test_websocket_investigation_stream(client):
     """Test real-time WebSocket connection and event streaming."""
@@ -45,7 +44,6 @@ def test_websocket_investigation_stream(client):
         assert "gateway" in step_events
         assert "risk_agent" in step_events
 
-
 def test_search_evidence_post(client):
     """Test POST /api/v1/search endpoint with natural language query."""
     response = client.post(
@@ -62,7 +60,6 @@ def test_search_evidence_post(client):
     assert "score" in first_hit
     assert first_hit["score"] > 0.0
 
-
 def test_search_evidence_get(client):
     """Test GET /api/v1/search endpoint."""
     response = client.get("/api/v1/search?q=trust+isolation&limit=2")
@@ -70,7 +67,6 @@ def test_search_evidence_get(client):
     data = response.json()
     assert data["query"] == "trust isolation"
     assert len(data["hits"]) <= 2
-
 
 def test_generate_ai_report(client):
     """Test POST /api/v1/report/generate endpoint."""
@@ -90,3 +86,15 @@ def test_generate_ai_report(client):
     assert len(report["key_findings"]) >= 3
     assert len(report["entities"]) >= 3
     assert len(report["recommendations"]) >= 2
+
+def test_get_case_evidence(client):
+    """Test GET /api/v1/cases/{case_id}/evidence endpoint."""
+    # First, list cases to get a valid case_id
+    res_cases = client.get("/api/v1/cases")
+    assert res_cases.status_code == 200
+    cases = res_cases.json()
+    if len(cases) > 0:
+        case_id = cases[0]["id"]
+        res_ev = client.get(f"/api/v1/cases/{case_id}/evidence")
+        assert res_ev.status_code == 200
+        assert isinstance(res_ev.json(), list)
