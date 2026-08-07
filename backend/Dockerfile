@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN pip install --default-timeout=1000 --retries=10 --no-cache-dir --prefix=/install -r requirements.txt
 
 FROM python:3.12-slim
 

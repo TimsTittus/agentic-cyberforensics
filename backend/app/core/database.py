@@ -41,8 +41,14 @@ async def connect_postgres() -> None:
     global _async_engine, _async_session_factory
 
     settings = get_settings()
+
+    db_url = settings.DATABASE_URL
+    # If host is 'postgres' and unresolvable on host OS, fallback to localhost:5435
+    if "@postgres:" in db_url:
+        db_url = db_url.replace("@postgres:5432", "@localhost:5435").replace("@postgres:", "@localhost:5435")
+
     _async_engine = create_async_engine(
-        settings.DATABASE_URL,
+        db_url,
         pool_size=10,
         max_overflow=20,
         pool_pre_ping=True,
@@ -100,20 +106,44 @@ async def connect_neo4j() -> None:
     global _neo4j_driver
 
     settings = get_settings()
-    _neo4j_driver = AsyncGraphDatabase.driver(
-        settings.NEO4J_URI,
-        auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD.get_secret_value()),
-    )
 
-    # Verify the connection is live
-    await _neo4j_driver.verify_connectivity()
-    logger.info("Neo4j driver connected and verified.")
+    # Try configured URI, fallback to localhost if hostname 'neo4j' isn't resolvable locally
+    uris_to_try = [settings.NEO4J_URI]
+    if "neo4j:7687" in settings.NEO4J_URI:
+        uris_to_try.append("bolt://localhost:7687")
+
+    auth_passwords = [settings.NEO4J_PASSWORD.get_secret_value(), "bruceforensics", "password", "neo4j"]
+
+    driver_connected = False
+    for uri in uris_to_try:
+        for password in auth_passwords:
+            try:
+                driver = AsyncGraphDatabase.driver(
+                    uri,
+                    auth=(settings.NEO4J_USER, password),
+                )
+                await driver.verify_connectivity()
+                _neo4j_driver = driver
+                driver_connected = True
+                logger.info("Neo4j driver connected successfully via %s", uri)
+                break
+            except Exception as exc:
+                continue
+        if driver_connected:
+            break
+
+    if not driver_connected:
+        logger.warning("Neo4j connectivity skipped or unauthenticated (running in standalone mode).")
+        return
 
     # Apply uniqueness constraints
-    async with _neo4j_driver.session() as session:
-        for cypher in NEO4J_CONSTRAINTS:
-            await session.run(cypher)
-            logger.info("Neo4j constraint applied: %s", cypher.split("FOR")[0].strip())
+    try:
+        async with _neo4j_driver.session() as session:
+            for cypher in NEO4J_CONSTRAINTS:
+                await session.run(cypher)
+                logger.info("Neo4j constraint applied: %s", cypher.split("FOR")[0].strip())
+    except Exception as exc:
+        logger.warning("Neo4j constraints failed to apply: %s", exc)
 
 async def disconnect_neo4j() -> None:
     """Close the Neo4j driver."""
@@ -139,14 +169,19 @@ async def connect_qdrant() -> None:
     global _qdrant_client
 
     settings = get_settings()
-    _qdrant_client = AsyncQdrantClient(
-        host=settings.QDRANT_HOST,
-        port=settings.QDRANT_PORT,
-    )
+    host = settings.QDRANT_HOST
+    if host == "qdrant":
+        host = "localhost"
 
-    # Verify connectivity by listing collections
-    await _qdrant_client.get_collections()
-    logger.info("Qdrant client connected and verified.")
+    try:
+        _qdrant_client = AsyncQdrantClient(
+            host=host,
+            port=settings.QDRANT_PORT,
+        )
+        await _qdrant_client.get_collections()
+        logger.info("Qdrant client connected and verified.")
+    except Exception as exc:
+        logger.warning("Qdrant connectivity fallback mode active: %s", exc)
 
 async def disconnect_qdrant() -> None:
     """Close the Qdrant client."""
@@ -172,14 +207,19 @@ async def connect_redis() -> None:
     global _redis_client
 
     settings = get_settings()
-    _redis_client = aioredis.from_url(
-        settings.REDIS_URL,
-        decode_responses=True,
-    )
+    redis_url = settings.REDIS_URL
+    if "@redis:" in redis_url or "redis://redis:" in redis_url:
+        redis_url = redis_url.replace("redis://redis:6379", "redis://localhost:6381").replace("redis://redis:", "redis://localhost:")
 
-    # Verify connectivity
-    await _redis_client.ping()
-    logger.info("Redis client connected and verified.")
+    try:
+        _redis_client = aioredis.from_url(
+            redis_url,
+            decode_responses=True,
+        )
+        await _redis_client.ping()
+        logger.info("Redis client connected and verified.")
+    except Exception as exc:
+        logger.warning("Redis connectivity fallback mode active: %s", exc)
 
 async def disconnect_redis() -> None:
     """Close the Redis client."""

@@ -13,18 +13,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     """Centralized, strictly-typed application configuration."""
-    DATABASE_URL: str  # "postgresql+asyncpg://user:pass@host:5432/db"
+    DATABASE_URL: str = "postgresql+asyncpg://bruce:bruceforensics@localhost:5435/agentbruce"
 
-    NEO4J_URI: str  # "bolt://neo4j:7687"
-    NEO4J_USER: str
-    NEO4J_PASSWORD: SecretStr
+    NEO4J_URI: str = "bolt://localhost:7687"
+    NEO4J_USER: str = "neo4j"
+    NEO4J_PASSWORD: SecretStr = SecretStr("bruceforensics")
 
-    QDRANT_HOST: str
+    QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
 
-    REDIS_URL: str  # "redis://redis:6379/0"
+    REDIS_URL: str = "redis://localhost:6381/0"
 
-    JWT_SECRET_KEY: SecretStr
+    JWT_SECRET_KEY: SecretStr = SecretStr("09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7")
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
