@@ -5,18 +5,12 @@ from app.agents.specialized.grooming import grooming_agent
 from app.agents.specialized.multimedia import multimedia_agent
 from app.agents.specialized.osint import osint_agent
 from app.agents.specialized.synthetic import synthetic_agent
+from app.agents.specialized.timeline import timeline_agent
+from app.agents.specialized.fusion import fusion_agent
+from app.agents.specialized.risk import risk_agent
 
-# Dummy node functions returning unmodified state for remaining downstream agents
+# Entry Gateway node function
 def gateway(state: InvestigationState) -> Dict[str, Any]:
-    return {}
-
-def timeline_agent(state: InvestigationState) -> Dict[str, Any]:
-    return {}
-
-def fusion_agent(state: InvestigationState) -> Dict[str, Any]:
-    return {}
-
-def risk_agent(state: InvestigationState) -> Dict[str, Any]:
     return {}
 
 # Initialize StateGraph
