@@ -16,10 +16,12 @@ import os
 from celery import Celery
 
 # ---------------------------------------------------------------------------
-# Read broker URL from environment (same REDIS_URL used by the async client).
-# Falls back to a sensible development default.
+# Read broker URL from Settings (same REDIS_URL used by the async client).
 # ---------------------------------------------------------------------------
-_REDIS_URL: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
+from app.core.config import get_settings
+
+settings = get_settings()
+_REDIS_URL: str = settings.REDIS_URL
 
 celery_app = Celery("agentbruce")
 

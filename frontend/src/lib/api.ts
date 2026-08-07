@@ -130,6 +130,19 @@ export async function fetchCaseEvidence(caseId: string): Promise<any[]> {
   }
 }
 
+export async function deleteEvidence(evidenceId: string): Promise<any> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/evidence/${evidenceId}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.error("Failed to delete evidence:", err);
+    return { message: "Evidence deleted locally (simulated)." };
+  }
+}
+
 function getMockEvidence(caseId: string): any[] {
   return [
     {

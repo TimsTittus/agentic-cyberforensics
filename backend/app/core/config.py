@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = False
 
-    STORAGE_ROOT: str = "/app/storage/evidence"
+    STORAGE_ROOT: str = "storage/evidence"
 
     model_config = SettingsConfigDict(
         env_file=".env",

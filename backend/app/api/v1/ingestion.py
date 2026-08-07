@@ -155,3 +155,44 @@ async def upload_evidence(
         "task_id": task.id,
         "message": "Evidence ingested successfully. Processing queued.",
     }
+
+@router.delete(
+    "/evidence/{evidence_id}",
+    summary="Delete forensic evidence",
+)
+async def delete_evidence(
+    evidence_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db_session),
+):
+    """
+    Remove evidence record from PostgreSQL, delete disk file, and detach/delete the corresponding node from Neo4j.
+    """
+    # 1. Fetch the evidence record
+    result = await db.execute(select(Evidence).where(Evidence.id == evidence_id))
+    evidence = result.scalar_one_or_none()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    # 2. Delete the local file from disk if it exists
+    if evidence.file_path and os.path.exists(evidence.file_path):
+        try:
+            os.remove(evidence.file_path)
+            logger.info("Deleted evidence file: %s", evidence.file_path)
+        except Exception as err:
+            logger.warning("Failed to delete physical file: %s", err)
+
+    # 3. Detach and delete from Neo4j
+    try:
+        from app.core.database import get_neo4j_driver
+        driver = get_neo4j_driver()
+        async with driver.session() as session:
+            await session.run("MATCH (e:Evidence {id: $ev_id}) DETACH DELETE e", ev_id=str(evidence_id))
+            logger.info("Deleted evidence node from Neo4j: %s", evidence_id)
+    except Exception as neo_err:
+        logger.warning("Failed to delete Neo4j node for evidence %s: %s", evidence_id, neo_err)
+
+    # 4. Remove from PostgreSQL
+    await db.delete(evidence)
+    await db.commit()
+
+    return {"message": "Evidence deleted successfully."}

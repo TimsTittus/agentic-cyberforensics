@@ -50,10 +50,8 @@ async def get_intelligence_graph(
     if case_id:
         cypher = """
         MATCH (c:Case {id: $case_id})
-        MATCH path = (c)-[*0..3]-(n)
-        WITH c, n
+        MATCH (c)-[*0..2]-(n)
         OPTIONAL MATCH (n)-[r]->(m)
-        WHERE (c)-[*0..3]-(m)
         RETURN n, r, m
         LIMIT 300
         """
@@ -136,7 +134,7 @@ async def get_intelligence_graph(
                 r = rec.get("r")
                 m = rec.get("m")
 
-                if n:
+                if n is not None:
                     node_id = str(n.element_id if hasattr(n, "element_id") else n.id if hasattr(n, "id") else n.get("id", str(hash(str(n)))))
                     labels = list(n.labels) if hasattr(n, "labels") else ["Node"]
                     primary_label = labels[0] if labels else "Node"
@@ -150,7 +148,7 @@ async def get_intelligence_graph(
                             "color": NODE_COLOR_MAP.get(primary_label, "#6366f1"),
                         }
 
-                if m:
+                if m is not None:
                     m_id = str(m.element_id if hasattr(m, "element_id") else m.id if hasattr(m, "id") else m.get("id", str(hash(str(m)))))
                     m_labels = list(m.labels) if hasattr(m, "labels") else ["Node"]
                     m_primary = m_labels[0] if m_labels else "Node"
@@ -164,7 +162,7 @@ async def get_intelligence_graph(
                             "color": NODE_COLOR_MAP.get(m_primary, "#6366f1"),
                         }
 
-                if n and m and r:
+                if n is not None and m is not None and r is not None:
                     n_id = str(n.element_id if hasattr(n, "element_id") else n.id if hasattr(n, "id") else n.get("id", str(hash(str(n)))))
                     m_id = str(m.element_id if hasattr(m, "element_id") else m.id if hasattr(m, "id") else m.get("id", str(hash(str(m)))))
                     rel_type = r.type if hasattr(r, "type") else "RELATED"

@@ -39,6 +39,7 @@ import {
   createCase,
   uploadEvidence,
   fetchCaseEvidence,
+  deleteEvidence,
   searchEvidence,
   generateAiReport,
   type CaseData,
@@ -794,18 +795,33 @@ export default function DashboardPage() {
                                   {ev.file_path.split("/").pop()}
                                 </span>
                               </div>
-                              <Badge
-                                variant={
-                                  ev.processed_status === "completed"
-                                    ? "low"
-                                    : ev.processed_status === "processing"
-                                      ? "medium"
-                                      : "high"
-                                }
-                                className="text-[9px] px-1.5 py-0"
-                              >
-                                {ev.processed_status}
-                              </Badge>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <Badge
+                                  variant={
+                                    ev.processed_status === "completed"
+                                      ? "low"
+                                      : ev.processed_status === "processing"
+                                        ? "medium"
+                                        : "high"
+                                  }
+                                  className="text-[9px] px-1.5 py-0 animate-fade-in"
+                                >
+                                  {ev.processed_status}
+                                </Badge>
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (confirm(`Are you sure you want to delete "${ev.file_path.split("/").pop()}"?`)) {
+                                      await deleteEvidence(ev.id);
+                                      fetchEvidenceForCase(selectedCaseId);
+                                    }
+                                  }}
+                                  className="p-1 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-500 transition-colors"
+                                  title="Delete evidence"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
                             <div className="text-[10px] text-slate-400 space-y-0.5">
                               <p className="font-mono truncate select-all" title={ev.sha256_hash}>
