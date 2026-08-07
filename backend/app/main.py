@@ -19,6 +19,9 @@ from app.api.v1.cases import router as cases_router
 from app.api.v1.graph import router as graph_router
 from app.api.v1.health import router as health_router
 from app.api.v1.ingestion import router as ingestion_router
+from app.api.v1.report import router as report_router
+from app.api.v1.search import router as search_router
+from app.api.v1.ws import router as ws_router
 from app.core.config import get_settings
 from app.core.database import (
     connect_neo4j,
@@ -92,6 +95,9 @@ app.include_router(health_router, prefix="/api/v1")
 app.include_router(ingestion_router, prefix="/api/v1")
 app.include_router(cases_router, prefix="/api/v1")
 app.include_router(graph_router, prefix="/api/v1")
+app.include_router(ws_router, prefix="/api/v1")
+app.include_router(search_router, prefix="/api/v1")
+app.include_router(report_router, prefix="/api/v1")
 
 @app.get("/", tags=["root"])
 async def root():

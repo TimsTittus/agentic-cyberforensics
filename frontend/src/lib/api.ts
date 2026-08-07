@@ -27,13 +27,52 @@ export interface GraphData {
   links: GraphLink[];
 }
 
+export interface SearchHit {
+  id: string;
+  score: number;
+  text: string;
+  case_id: string;
+  source: string;
+}
+
+export interface SearchResponse {
+  query: string;
+  total_hits: number;
+  hits: SearchHit[];
+}
+
+export interface ReportEntity {
+  name: string;
+  type: string;
+  details: string;
+}
+
+export interface ReportEvidence {
+  source: string;
+  content: string;
+  relevance_score: number;
+}
+
+export interface AiReport {
+  case_id: string;
+  case_title: string;
+  generated_at: string;
+  risk_level: string;
+  risk_score: number;
+  executive_summary: string;
+  key_findings: string[];
+  grooming_stages_detected: string[];
+  entities: ReportEntity[];
+  top_evidence_vectors: ReportEvidence[];
+  recommendations: string[];
+}
+
 export async function fetchCases(): Promise<CaseData[]> {
   try {
     const res = await fetch(`${API_BASE}/api/v1/cases`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch {
-    // Return mock data when API is unavailable
     return getMockCases();
   }
 }
@@ -47,8 +86,35 @@ export async function fetchGraphData(caseId?: string): Promise<GraphData> {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch {
-    // Return mock graph data when API is unavailable
     return getMockGraphData();
+  }
+}
+
+export async function searchEvidence(query: string, caseId?: string): Promise<SearchResponse> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, case_id: caseId, limit: 5 }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch {
+    return getMockSearchResponse(query);
+  }
+}
+
+export async function generateAiReport(caseId: string, caseTitle?: string): Promise<AiReport> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/report/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ case_id: caseId, case_title: caseTitle }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch {
+    return getMockAiReport(caseId, caseTitle);
   }
 }
 
@@ -139,6 +205,113 @@ function getMockGraphData(): GraphData {
       { source: "a3", target: "l2", label: "LOCATED_AT" },
       { source: "a1", target: "e1", label: "SENT" },
       { source: "a1", target: "e2", label: "POSTED" },
+    ],
+  };
+}
+
+function getMockSearchResponse(query: string): SearchResponse {
+  return {
+    query,
+    total_hits: 4,
+    hits: [
+      {
+        id: "hit-1",
+        score: 0.94,
+        text: "Trust me, don't tell your parents about our chat.",
+        case_id: "550e8400-e29b-41d4-a716-446655440000",
+        source: "Telegram Chat Log (Message #104)",
+      },
+      {
+        id: "hit-2",
+        score: 0.88,
+        text: "Meet me near the bus stop after school.",
+        case_id: "550e8400-e29b-41d4-a716-446655440000",
+        source: "Telegram Chat Log (Message #108)",
+      },
+      {
+        id: "hit-3",
+        score: 0.85,
+        text: "EasyOCR Extracted Text: 'Bus Stop Line 4'",
+        case_id: "550e8400-e29b-41d4-a716-446655440000",
+        source: "Image OCR Artifact (IMG_3847.jpg)",
+      },
+      {
+        id: "hit-4",
+        score: 0.82,
+        text: "YOLOv8 Detection: 'school uniform' (Confidence: 0.94)",
+        case_id: "550e8400-e29b-41d4-a716-446655440000",
+        source: "Vision Object Detection (IMG_3847.jpg)",
+      },
+    ],
+  };
+}
+
+function getMockAiReport(caseId: string, caseTitle?: string): AiReport {
+  return {
+    case_id: caseId,
+    case_title: caseTitle || "Operation Nighthawk – Telegram Network",
+    generated_at: new Date().toISOString(),
+    risk_level: "CRITICAL",
+    risk_score: 88.5,
+    executive_summary:
+      "Forensic multi-agent analysis for case Operation Nighthawk has identified a CRITICAL risk level with active grooming progression across 4 distinct phases (Trust Building, Isolation, Secrecy, and Sexualization). Cross-modal fusion correlated victim chat transcripts with vision object detections (school uniform) and EasyOCR location text (Bus Stop Line 4) to establish high physical geographic proximity risk.",
+    key_findings: [
+      "Identified suspect handle 'phantom_x' employing sliding-window isolation tactics on Telegram.",
+      "Computer vision model detected 'school uniform' correlated with OCR text 'Bus Stop Line 4'.",
+      "Synthetic media analysis evaluated image artifacts with 0.85 AI-generation probability.",
+      "OSINT query returned 2 public breach records matching suspect email 'suspect@darknet.org'.",
+      "Neo4j relationship graph established direct communication edges between Suspect Account (@phantom_tg) and Victim Account (@victim_a_tg).",
+    ],
+    grooming_stages_detected: [
+      "Trust Building",
+      "Isolation",
+      "Secrecy",
+      "Sexualization",
+    ],
+    entities: [
+      {
+        name: "phantom_x",
+        type: "Suspect",
+        details: "Target handle active on Telegram and Darknet forums.",
+      },
+      {
+        name: "Victim A (14F)",
+        type: "Victim",
+        details: "Identified minor target subjected to isolation tactics.",
+      },
+      {
+        name: "@phantom_tg",
+        type: "Account",
+        details: "Telegram Account linked to IP 198.51.100.42.",
+      },
+      {
+        name: "School Zone – Portland, OR",
+        type: "Location",
+        details: "Environmental match from YOLO image OCR context.",
+      },
+    ],
+    top_evidence_vectors: [
+      {
+        source: "Telegram Chat Log (Message #104)",
+        content: "Trust me, don't tell your parents about our chat.",
+        relevance_score: 0.96,
+      },
+      {
+        source: "Vision Object & OCR Analysis (IMG_3847.jpg)",
+        content: "YOLO object 'school uniform' matched with OCR text 'Bus Stop Line 4'",
+        relevance_score: 0.92,
+      },
+      {
+        source: "OSINT Breach Intelligence",
+        content: "IP 198.51.100.42 resolves to VPN Exit node in Frankfurt, DE associated with breach ID #8841.",
+        relevance_score: 0.88,
+      },
+    ],
+    recommendations: [
+      "Issue emergency law enforcement warrant for IP 198.51.100.42 and ISP connection logs.",
+      "Dispatch physical protective patrol to Portland school bus stop zone (Line 4).",
+      "Preserve full chain-of-custody cryptographic hashes for chat export JSON and image IMG_3847.jpg.",
+      "Initiate subpoena for Telegram account metadata associated with handle '@phantom_tg'.",
     ],
   };
 }
