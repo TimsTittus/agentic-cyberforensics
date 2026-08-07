@@ -1,22 +1,59 @@
+# Environment & Secrets
 .env
+.env.local
+.env.*.local
+*.pem
+*.key
 
-# Python
+# Python & Virtual Environments
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+venv/
 .venv/
+env/
+ENV/
 *.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
 
-# Node
+# Node.js, Next.js & Package Managers
 node_modules/
 .next/
+out/
+.vercel
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
-# IDE
+# IDE & OS Metadata
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
 
-# Docker volumes (local)
+# Database Volumes & Local Storage
 postgres_data/
 neo4j_data/
 qdrant_data/
 redis_data/
+storage/
+*.log
+logs/
