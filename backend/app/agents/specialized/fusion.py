@@ -49,6 +49,8 @@ async def _run_fusion_async(state: InvestigationState) -> Dict[str, Any]:
             MERGE (s)-[:OWNS]->(sa)
             MERGE (v)-[:OWNS]->(va)
             MERGE (sa)-[:COMMUNICATED_WITH {case_id: $case_id}]->(va)
+            MERGE (c)-[:INVESTIGATES]->(s)
+            MERGE (c)-[:INVESTIGATES]->(v)
             """
             await session.run(
                 cypher,
@@ -60,6 +62,39 @@ async def _run_fusion_async(state: InvestigationState) -> Dict[str, Any]:
                 victim_account=f"acc-{victim_id}",
                 platform=platform,
             )
+
+            # Retrieve evidence items for this case from PostgreSQL and merge to Neo4j
+            from sqlalchemy import select
+            from app.models.schemas import Evidence as EvidenceModel
+            from app.core.database import _async_session_factory
+            
+            evidence_list = []
+            if _async_session_factory:
+                try:
+                    case_uuid = uuid.UUID(case_id)
+                    async with _async_session_factory() as db_session:
+                        stmt = select(EvidenceModel).where(EvidenceModel.case_id == case_uuid)
+                        res = await db_session.execute(stmt)
+                        evidence_list = res.scalars().all()
+                except Exception as db_err:
+                    logger.warning("Could not fetch database evidence for graph: %s", db_err)
+
+            for ev in evidence_list:
+                filename = os.path.basename(ev.file_path)
+                ev_cypher = """
+                MATCH (c:Case {id: $case_id})
+                MERGE (e:Evidence {id: $ev_id})
+                SET e.filename = $filename, e.file_type = $file_type, e.sha256 = $sha256
+                MERGE (c)-[:HAS_EVIDENCE]->(e)
+                """
+                await session.run(
+                    ev_cypher,
+                    case_id=case_id,
+                    ev_id=str(ev.id),
+                    filename=filename,
+                    file_type=ev.file_type or "binary",
+                    sha256=ev.sha256_hash,
+                )
 
             # Insert Location Nodes if media flags contain deduced location
             for flag in media_flags:
