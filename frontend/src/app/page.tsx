@@ -32,6 +32,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
   fetchCases,
+  createCase,
+  uploadEvidence,
   searchEvidence,
   generateAiReport,
   type CaseData,
@@ -85,9 +87,39 @@ export default function DashboardPage() {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
 
+  // New Case Creation state
+  const [showNewCaseModal, setShowNewCaseModal] = useState(false);
+  const [newCaseTitle, setNewCaseTitle] = useState("");
+  const [newCaseRisk, setNewCaseRisk] = useState("high");
+  const [newCaseFile, setNewCaseFile] = useState<File | null>(null);
+  const [isCreatingCase, setIsCreatingCase] = useState(false);
+  const [selectedCaseId, setSelectedCaseId] = useState<string>("550e8400-e29b-41d4-a716-446655440000");
+
   useEffect(() => {
     fetchCases().then(setCases);
   }, []);
+
+  const handleCreateCaseSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCaseTitle.trim()) return;
+    setIsCreatingCase(true);
+    try {
+      const created = await createCase(newCaseTitle, newCaseRisk);
+      if (newCaseFile) {
+        await uploadEvidence(created.id, newCaseFile);
+      }
+      setCases((prev) => [created, ...prev]);
+      setSelectedCaseId(created.id);
+      setActiveTab("execution");
+      setShowNewCaseModal(false);
+      setNewCaseTitle("");
+      setNewCaseFile(null);
+    } catch {
+      // Fallback
+    } finally {
+      setIsCreatingCase(false);
+    }
+  };
 
   const handleVectorSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -258,10 +290,18 @@ export default function DashboardPage() {
             </div>
 
             <button
+              onClick={() => setShowNewCaseModal(true)}
+              className="px-4 py-2.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-md shadow-slate-900/10 flex items-center gap-1.5 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              New Case
+            </button>
+
+            <button
               onClick={() =>
                 handleGenerateReport(
-                  "550e8400-e29b-41d4-a716-446655440000",
-                  "Operation Nighthawk – Telegram Network"
+                  selectedCaseId,
+                  cases.find((c) => c.id === selectedCaseId)?.title || "Operation Nighthawk – Telegram Network"
                 )
               }
               disabled={isGeneratingReport}
@@ -390,8 +430,12 @@ export default function DashboardPage() {
                       className="pl-10"
                     />
                   </div>
-                  <button className="p-2.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition-all">
-                    <SlidersHorizontal className="w-4 h-4" />
+                  <button
+                    onClick={() => setShowNewCaseModal(true)}
+                    className="px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-sm flex items-center gap-1.5 transition-all"
+                  >
+                    <Plus className="w-4 h-4" />
+                    New Case
                   </button>
                 </div>
               </CardHeader>
@@ -602,6 +646,119 @@ export default function DashboardPage() {
           )}
         </main>
       </div>
+      {/* New Case Creation & Execution Modal */}
+      {showNewCaseModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl p-6 space-y-6">
+            <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-600/20">
+                  <Shield className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">Start New Forensic Case</h3>
+                  <p className="text-xs text-slate-400">Initialize investigation docket & launch LangGraph pipeline</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowNewCaseModal(false)}
+                className="p-2 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateCaseSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                  Case Title / Codename *
+                </label>
+                <Input
+                  required
+                  placeholder="e.g. Operation Nighthawk – Telegram Network"
+                  value={newCaseTitle}
+                  onChange={(e) => setNewCaseTitle(e.target.value)}
+                  className="h-11 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                  Initial Threat Assessment Risk Level
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {(["critical", "high", "medium", "low"] as const).map((level) => (
+                    <button
+                      key={level}
+                      type="button"
+                      onClick={() => setNewCaseRisk(level)}
+                      className={`py-2 rounded-xl text-xs font-bold capitalize transition-all border ${newCaseRisk === level
+                        ? "bg-slate-900 text-white border-slate-900 shadow-sm"
+                        : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                        }`}
+                    >
+                      {level}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                  Attach Evidence File (Optional)
+                </label>
+                <div className="border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-2xl p-4 text-center transition-all bg-slate-50/50">
+                  <input
+                    type="file"
+                    id="evidence-upload"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        setNewCaseFile(e.target.files[0]);
+                      }
+                    }}
+                  />
+                  <label htmlFor="evidence-upload" className="cursor-pointer space-y-1 block">
+                    <FileText className="w-6 h-6 text-slate-400 mx-auto" />
+                    {newCaseFile ? (
+                      <p className="text-xs font-semibold text-indigo-600 truncate max-w-xs mx-auto">
+                        {newCaseFile.name} ({(newCaseFile.size / 1024).toFixed(1)} KB)
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-xs font-semibold text-slate-700">
+                          Click to browse or drop digital evidence file
+                        </p>
+                        <p className="text-[11px] text-slate-400">
+                          Supports .txt, .json, .jpg, .png, .mp3, .wav (SHA-256 integrity check)
+                        </p>
+                      </>
+                    )}
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowNewCaseModal(false)}
+                  className="px-4 py-2.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingCase}
+                  className="px-5 py-2.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-md shadow-slate-900/10 flex items-center gap-2 transition-all"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  {isCreatingCase ? "Launching..." : "Create Case & Launch Pipeline"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* AI Lead Report Printable Modal */}
       {showReportModal && report && (

@@ -1,0 +1,11 @@
+[tool.pyright]
+include = ["backend/app", "backend/tests"]
+extraPaths = ["backend"]
+executionEnvironments = [
+  { root = "backend", pythonVersion = "3.12", pythonPlatform = "Linux" }
+]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "backend"
+ignore_missing_imports = true
