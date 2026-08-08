@@ -62,5 +62,6 @@ def run_investigation(case_id: str, extraction_artifact: Dict[str, Any]) -> Inve
         "timeline": [],
         "fused_leads": [],
         "risk_score": 0.0,
+        "cross_case_alerts": [],
     }
     return investigation_graph.invoke(initial_state)

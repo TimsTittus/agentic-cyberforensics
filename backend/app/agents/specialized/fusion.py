@@ -1,4 +1,5 @@
 import os
+import logging
 import uuid
 import asyncio
 import concurrent.futures
@@ -6,6 +7,8 @@ from typing import Dict, Any, List, Optional
 from sentence_transformers import SentenceTransformer
 from app.agents.state import InvestigationState
 from app.core.database import get_neo4j_driver, get_qdrant_client
+
+logger = logging.getLogger(__name__)
 
 # Singleton embedding model
 _embedding_model: Optional[SentenceTransformer] = None
@@ -207,7 +210,23 @@ async def _run_fusion_async(state: InvestigationState) -> Dict[str, Any]:
             }
         )
 
-    return {"fused_leads": fused_leads}
+    # 4. Cross-Case Serial Network Engine — global multi-case scan
+    cross_case_alerts: list = []
+    try:
+        from app.agents.specialized.cross_case_engine import run_cross_case_scan
+        cross_case_alerts = await run_cross_case_scan(state)
+        if cross_case_alerts:
+            fused_leads.append(
+                {
+                    "type": "Cross-Case Serial Network Match",
+                    "details": f"Detected {len(cross_case_alerts)} cross-case entity overlap(s) across historical cases.",
+                    "confidence": max(a["confidence_score"] for a in cross_case_alerts),
+                }
+            )
+    except Exception as exc:
+        logger.warning("Cross-case scan failed gracefully: %s", exc)
+
+    return {"fused_leads": fused_leads, "cross_case_alerts": cross_case_alerts}
 
 def fusion_agent(state: InvestigationState) -> Dict[str, Any]:
     """LangGraph node function to fuse graph data into Neo4j and vector embeddings into Qdrant."""

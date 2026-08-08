@@ -95,6 +95,7 @@ async def websocket_investigation(websocket: WebSocket, case_id: str):
             "timeline": [],
             "fused_leads": [],
             "risk_score": 0.0,
+            "cross_case_alerts": [],
         }
 
         await websocket.send_json({
@@ -123,6 +124,17 @@ async def websocket_investigation(websocket: WebSocket, case_id: str):
                     "node": node_name,
                     "state_update": sanitized_delta,
                 })
+
+                # Broadcast cross-case match alert if fusion agent detected overlaps
+                if node_name == "fusion_agent":
+                    cc_alerts = sanitized_delta.get("cross_case_alerts", [])
+                    if cc_alerts:
+                        await websocket.send_json({
+                            "event": "cross_case_match",
+                            "case_id": case_id,
+                            "alerts": cc_alerts,
+                        })
+
                 # Small pause to allow smooth real-time animation on client UI
                 await asyncio.sleep(0.3)
 

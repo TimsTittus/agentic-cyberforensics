@@ -150,7 +150,10 @@ async def disconnect_neo4j() -> None:
     global _neo4j_driver
 
     if _neo4j_driver is not None:
-        await _neo4j_driver.close()
+        try:
+            await _neo4j_driver.close()
+        except RuntimeError:
+            pass  # Event loop may already be closed during test teardown
         _neo4j_driver = None
         logger.info("Neo4j driver closed.")
 

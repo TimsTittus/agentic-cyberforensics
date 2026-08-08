@@ -21,6 +21,7 @@ def test_timeline_agent_chronological_sorting():
         "timeline": [],
         "fused_leads": [],
         "risk_score": 0.0,
+        "cross_case_alerts": [],
     }
 
     result = timeline_agent(state)
@@ -48,6 +49,7 @@ def test_fusion_agent_execution():
         "timeline": [],
         "fused_leads": [],
         "risk_score": 0.0,
+        "cross_case_alerts": [],
     }
 
     result = fusion_agent(state)
@@ -70,6 +72,7 @@ def test_risk_agent_calculation():
         "timeline": [],
         "fused_leads": [],
         "risk_score": 0.0,
+        "cross_case_alerts": [],
     }
 
     result = risk_agent(state)

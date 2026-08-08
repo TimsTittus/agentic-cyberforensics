@@ -145,3 +145,22 @@ class Evidence(Base):
 
     def __repr__(self) -> str:
         return f"<Evidence(id={self.id}, sha256='{self.sha256_hash[:12]}...', status='{self.processed_status}')>"
+
+
+# ---------------------------------------------------------------------------
+# Pydantic response-only models (not persisted ORM tables)
+# ---------------------------------------------------------------------------
+from pydantic import BaseModel as PydanticBase
+
+
+class CrossCaseMatchAlert(PydanticBase):
+    """Ephemeral alert surfaced when a cross-case entity overlap is detected."""
+
+    alert_id: str
+    current_case_id: str
+    matched_case_id: str
+    matched_case_title: str
+    matched_entity_type: str
+    matched_entity_value: str
+    confidence_score: float
+    linking_reason: str

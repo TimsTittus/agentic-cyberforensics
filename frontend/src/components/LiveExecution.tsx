@@ -37,7 +37,7 @@ const INITIAL_AGENTS: AgentStepStatus[] = [
   { id: "risk_agent", name: "Risk Assessment Engine", category: "Scoring Matrix", status: "idle" },
 ];
 
-export default function LiveExecution({ caseId }: { caseId: string }) {
+export default function LiveExecution({ caseId, onCrossCaseMatch }: { caseId: string; onCrossCaseMatch?: (alerts: any[]) => void }) {
   const [agents, setAgents] = useState<AgentStepStatus[]>(INITIAL_AGENTS);
   const [isExecuting, setIsExecuting] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
@@ -138,6 +138,12 @@ export default function LiveExecution({ caseId }: { caseId: string }) {
               })
             );
             setExecutionLog((prev) => [...prev, `[Step] Completed node: ${nodeName}`]);
+          } else if (data.event === "cross_case_match") {
+            // Phase 10: Cross-Case Serial Network alert
+            if (data.alerts && data.alerts.length > 0 && onCrossCaseMatch) {
+              onCrossCaseMatch(data.alerts);
+            }
+            setExecutionLog((prev) => [...prev, `[ALERT] Cross-case pattern detected: ${data.alerts?.length || 0} match(es)`]);
           } else if (data.event === "complete") {
             setIsExecuting(false);
             setAgents((prev) => prev.map((a) => ({ ...a, status: "completed" })));
@@ -157,7 +163,7 @@ export default function LiveExecution({ caseId }: { caseId: string }) {
       setWsConnected(false);
       startSimulatedExecution();
     }
-  }, [caseId, isExecuting, startSimulatedExecution]);
+  }, [caseId, isExecuting, startSimulatedExecution, onCrossCaseMatch]);
 
   useEffect(() => {
     return () => {

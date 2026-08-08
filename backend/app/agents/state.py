@@ -12,3 +12,4 @@ class InvestigationState(TypedDict):
     timeline: Annotated[List[Dict[str, Any]], operator.add]
     fused_leads: Annotated[List[Dict[str, Any]], operator.add]
     risk_score: float
+    cross_case_alerts: Annotated[List[Dict[str, Any]], operator.add]

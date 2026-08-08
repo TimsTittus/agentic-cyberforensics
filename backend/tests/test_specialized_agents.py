@@ -22,6 +22,7 @@ def test_grooming_agent_detects_indicators():
         "timeline": [],
         "fused_leads": [],
         "risk_score": 0.0,
+        "cross_case_alerts": [],
     }
 
     result = grooming_agent(state)
@@ -46,6 +47,7 @@ def test_multimedia_agent_deduces_context():
         "timeline": [],
         "fused_leads": [],
         "risk_score": 0.0,
+        "cross_case_alerts": [],
     }
 
     result = multimedia_agent(state)

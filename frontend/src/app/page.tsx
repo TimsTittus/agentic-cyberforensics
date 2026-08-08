@@ -48,6 +48,7 @@ import {
 } from "@/lib/api";
 import GraphExplorer from "@/components/GraphExplorer";
 import LiveExecution from "@/components/LiveExecution";
+import CrossCaseFusionModal, { type CrossCaseAlert } from "@/components/CrossCaseFusionModal";
 
 function getRiskVariant(level: string) {
   const map: Record<string, "critical" | "high" | "medium" | "low"> = {
@@ -105,6 +106,15 @@ export default function DashboardPage() {
   const [caseEvidence, setCaseEvidence] = useState<any[]>([]);
   const [isLoadingEvidence, setIsLoadingEvidence] = useState(false);
   const [workspaceSubTab, setWorkspaceSubTab] = useState<"details" | "execution" | "graph" | "search">("details");
+
+  // Phase 10: Cross-Case Serial Network Engine state
+  const [crossCaseAlerts, setCrossCaseAlerts] = useState<CrossCaseAlert[]>([]);
+  const [showCrossCaseModal, setShowCrossCaseModal] = useState(false);
+
+  const handleCrossCaseMatch = (alerts: CrossCaseAlert[]) => {
+    setCrossCaseAlerts(alerts);
+    setShowCrossCaseModal(true);
+  };
 
   useEffect(() => {
     fetchCases().then(setCases);
@@ -568,7 +578,7 @@ export default function DashboardPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-6">
-                <LiveExecution caseId="550e8400-e29b-41d4-a716-446655440000" />
+                <LiveExecution caseId="550e8400-e29b-41d4-a716-446655440000" onCrossCaseMatch={handleCrossCaseMatch} />
               </CardContent>
             </Card>
           )}
@@ -983,7 +993,7 @@ export default function DashboardPage() {
                   )}
 
                   {workspaceSubTab === "execution" && (
-                    <LiveExecution caseId={selectedCaseId} />
+                    <LiveExecution caseId={selectedCaseId} onCrossCaseMatch={handleCrossCaseMatch} />
                   )}
 
                   {workspaceSubTab === "graph" && (
@@ -1355,6 +1365,16 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Phase 10: Cross-Case Serial Network Fusion Alert Modal */}
+      <CrossCaseFusionModal
+        open={showCrossCaseModal}
+        onClose={() => setShowCrossCaseModal(false)}
+        alerts={crossCaseAlerts}
+        currentCaseTitle={
+          cases.find((c) => c.id === selectedCaseId)?.title || "Active Case"
+        }
+      />
     </div>
   );
 }

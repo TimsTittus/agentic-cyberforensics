@@ -14,6 +14,7 @@ def test_investigation_state_keys():
         "timeline": [],
         "fused_leads": [],
         "risk_score": 0.0,
+        "cross_case_alerts": [],
     }
     assert state["case_id"] == "test-case-123"
     assert state["raw_payload"] == {"sample": "data"}

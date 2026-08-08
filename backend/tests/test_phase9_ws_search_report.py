@@ -30,12 +30,14 @@ def test_websocket_investigation_stream(client):
         assert start_data["event"] == "start"
         assert start_data["case_id"] == "test-case-123"
 
-        # Step 3: Receive step events
+        # Step 3: Receive step events (may include cross_case_match events)
         step_events = []
         while True:
             msg = websocket.receive_json()
             if msg["event"] == "complete":
                 break
+            if msg["event"] == "cross_case_match":
+                continue  # Phase 10: cross-case alerts are separate events
             assert msg["event"] == "step"
             assert "node" in msg
             step_events.append(msg["node"])

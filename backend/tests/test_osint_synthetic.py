@@ -35,6 +35,7 @@ def test_osint_agent_execution_and_resilience():
         "timeline": [],
         "fused_leads": [],
         "risk_score": 0.0,
+        "cross_case_alerts": [],
     }
 
     result = osint_agent(state)
@@ -63,6 +64,7 @@ async def test_osint_agent_async_direct():
         "timeline": [],
         "fused_leads": [],
         "risk_score": 0.0,
+        "cross_case_alerts": [],
     }
 
     result = await _run_osint_async(state)
@@ -85,6 +87,7 @@ def test_synthetic_agent_detects_missing_exif():
         "timeline": [],
         "fused_leads": [],
         "risk_score": 0.0,
+        "cross_case_alerts": [],
     }
 
     result = synthetic_agent(state)
@@ -109,6 +112,7 @@ def test_synthetic_agent_numpy_pixel_variance():
         "timeline": [],
         "fused_leads": [],
         "risk_score": 0.0,
+        "cross_case_alerts": [],
     }
 
     result = synthetic_agent(state)
