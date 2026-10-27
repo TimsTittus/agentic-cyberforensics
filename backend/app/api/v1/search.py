@@ -53,66 +53,6 @@ class SearchResponse(BaseModel):
     hits: List[SearchHit]
 
 
-def _get_fallback_hits(query: str, case_id: Optional[str] = None, limit: int = 5) -> List[SearchHit]:
-    """Generates contextually relevant mock hits when Qdrant is uninitialized or empty."""
-    query_lower = query.lower()
-    all_mock_evidence = [
-        {
-            "id": "hit-1",
-            "score": 0.94,
-            "text": "Trust me, don't tell your parents about our chat.",
-            "case_id": case_id or "550e8400-e29b-41d4-a716-446655440000",
-            "source": "Telegram Chat Log (Message #104)",
-        },
-        {
-            "id": "hit-2",
-            "score": 0.88,
-            "text": "Meet me near the bus stop after school.",
-            "case_id": case_id or "550e8400-e29b-41d4-a716-446655440000",
-            "source": "Telegram Chat Log (Message #108)",
-        },
-        {
-            "id": "hit-3",
-            "score": 0.85,
-            "text": "EasyOCR Extracted Text: 'Bus Stop Line 4'",
-            "case_id": case_id or "550e8400-e29b-41d4-a716-446655440000",
-            "source": "Image OCR Artifact (IMG_3847.jpg)",
-        },
-        {
-            "id": "hit-4",
-            "score": 0.82,
-            "text": "YOLOv8 Detection: 'school uniform' (Confidence: 0.94)",
-            "case_id": case_id or "550e8400-e29b-41d4-a716-446655440000",
-            "source": "Vision Object Detection (IMG_3847.jpg)",
-        },
-        {
-            "id": "hit-5",
-            "score": 0.79,
-            "text": "Dark Web Forum Post: 'Offering access to private chat exports'",
-            "case_id": case_id or "990e8400-e29b-41d4-a716-446655440004",
-            "source": "OSINT Breach Artifact",
-        },
-    ]
-
-    matched = []
-    for item in all_mock_evidence:
-        # Boost score slightly if keywords match
-        words = [w for w in query_lower.split() if len(w) > 2]
-        matches = sum(1 for w in words if w in item["text"].lower())
-        boosted_score = min(0.99, item["score"] + (0.02 * matches))
-        matched.append(
-            SearchHit(
-                id=item["id"],
-                score=round(boosted_score, 4),
-                text=item["text"],
-                case_id=item["case_id"],
-                source=item["source"],
-            )
-        )
-
-    matched.sort(key=lambda x: x.score, reverse=True)
-    return matched[:limit]
-
 
 @router.post("/search", response_model=SearchResponse, summary="Vector semantic evidence search")
 async def search_evidence_post(payload: SearchRequest):
@@ -146,8 +86,8 @@ async def _execute_vector_search(query: str, case_id: Optional[str], limit: int)
         collection_names = [c.name for c in collections.collections]
 
         if collection_name not in collection_names:
-            hits = _get_fallback_hits(query, case_id, limit)
-            return SearchResponse(query=query, total_hits=len(hits), hits=hits)
+            logger.info("Qdrant collection '%s' does not exist yet — no evidence indexed.", collection_name)
+            return SearchResponse(query=query, total_hits=0, hits=[])
 
         # Search Qdrant
         results = await qdrant.search(
@@ -159,6 +99,9 @@ async def _execute_vector_search(query: str, case_id: Optional[str], limit: int)
         hits: List[SearchHit] = []
         for res in results:
             payload = res.payload or {}
+            # Filter by case_id if provided
+            if case_id and payload.get("case_id") != case_id:
+                continue
             hits.append(
                 SearchHit(
                     id=str(res.id),
@@ -169,12 +112,8 @@ async def _execute_vector_search(query: str, case_id: Optional[str], limit: int)
                 )
             )
 
-        if not hits:
-            hits = _get_fallback_hits(query, case_id, limit)
-
         return SearchResponse(query=query, total_hits=len(hits), hits=hits)
 
     except Exception as exc:
-        logger.warning("Qdrant vector search failed, returning fallback hits: %s", exc)
-        hits = _get_fallback_hits(query, case_id, limit)
-        return SearchResponse(query=query, total_hits=len(hits), hits=hits)
+        logger.warning("Qdrant vector search failed: %s", exc)
+        return SearchResponse(query=query, total_hits=0, hits=[])

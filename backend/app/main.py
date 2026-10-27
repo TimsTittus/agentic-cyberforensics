@@ -63,10 +63,13 @@ async def lifespan(app: FastAPI):
     await connect_redis()
 
     # Create PostgreSQL tables if they don't exist
-    engine: AsyncEngine = get_async_engine()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("PostgreSQL tables verified/created.")
+    try:
+        engine: AsyncEngine = get_async_engine()
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("PostgreSQL tables verified/created.")
+    except Exception as exc:
+        logger.warning("PostgreSQL unavailable — running in standalone mode: %s", exc)
 
     logger.info("All database connections established. System ready.")
 

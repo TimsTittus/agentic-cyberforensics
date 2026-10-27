@@ -3,20 +3,24 @@ AgentBruce — AI Case Summary & Lead Report Generator API
 
 POST /api/v1/report/generate
 
-Synthesizes Neo4j knowledge graph topology and Qdrant vector evidence hits
-into an executive forensic investigation report.
+Synthesizes PostgreSQL evidence records, Neo4j knowledge graph topology,
+and Qdrant vector evidence hits into an executive forensic investigation report.
+All content is derived from real ingested data — no hardcoded mock fallbacks.
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_neo4j_driver, get_qdrant_client
+from app.core.database import get_neo4j_driver, get_qdrant_client, get_db_session
+from app.models.schemas import Case, Evidence
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +29,7 @@ router = APIRouter(tags=["report"])
 
 class ReportRequest(BaseModel):
     case_id: str
-    case_title: Optional[str] = "Operation Nighthawk – Telegram Network"
+    case_title: Optional[str] = None
 
 
 class EntitySummary(BaseModel):
@@ -55,50 +59,84 @@ class AiReportResponse(BaseModel):
 
 
 @router.post("/report/generate", response_model=AiReportResponse, summary="Generate AI Case Summary & Lead Report")
-async def generate_ai_report(payload: ReportRequest):
+async def generate_ai_report(
+    payload: ReportRequest,
+    db: AsyncSession = Depends(get_db_session),
+):
     """
-    Synthesize graph relations from Neo4j and vector hits from Qdrant
-    into an executive forensic lead report.
+    Synthesize a forensic report from real data sources:
+    - PostgreSQL: case metadata and evidence records
+    - Neo4j: entity relationship graph (if connected)
+    - Qdrant: vector evidence hits (if connected and populated)
     """
     case_id = payload.case_id
-    case_title = payload.case_title or f"Forensic Investigation {case_id[:8]}"
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    # 1. Fetch Neo4j graph context if available
+    # 1. Load case from PostgreSQL
+    import uuid as _uuid
+    try:
+        case_uuid = _uuid.UUID(case_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid case_id: {case_id}")
+
+    case_result = await db.execute(select(Case).where(Case.id == case_uuid))
+    case = case_result.scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=404, detail=f"Case {case_id} not found.")
+
+    case_title = payload.case_title or case.title
+    risk_level = case.risk_level.upper()
+
+    # Risk score map
+    risk_score_map = {"critical": 90.0, "high": 72.0, "medium": 50.0, "low": 25.0}
+    risk_score = risk_score_map.get(case.risk_level.lower(), 50.0)
+
+    # 2. Load evidence records from PostgreSQL
+    ev_result = await db.execute(
+        select(Evidence).where(Evidence.case_id == case_uuid).order_by(Evidence.ingested_at.desc())
+    )
+    evidence_records = ev_result.scalars().all()
+
+    evidence_count = len(evidence_records)
+    processed_count = sum(1 for e in evidence_records if e.processed_status == "completed")
+    pending_count = sum(1 for e in evidence_records if e.processed_status == "pending")
+    file_types = list({e.file_type for e in evidence_records if e.file_type})
+
+    # 3. Fetch Neo4j graph entities for this case
     entities: List[EntitySummary] = []
     try:
         driver = get_neo4j_driver()
         async with driver.session() as session:
             cypher = """
             MATCH (n)
-            RETURN labels(n) AS labels, n.id AS id, n.handle AS handle, n.name AS name
-            LIMIT 10
+            WHERE n.case_id = $case_id OR n.caseId = $case_id
+            RETURN labels(n) AS labels, n.id AS id, n.handle AS handle,
+                   n.name AS name, n.platform_id AS platform_id
+            LIMIT 20
             """
-            result = await session.run(cypher)
+            result = await session.run(cypher, case_id=case_id)
             records = await result.data()
             for rec in records:
                 labels = rec.get("labels", ["Entity"])
                 lbl = labels[0] if labels else "Entity"
-                name = rec.get("handle") or rec.get("name") or rec.get("id") or lbl
+                name = (
+                    rec.get("handle")
+                    or rec.get("name")
+                    or rec.get("platform_id")
+                    or rec.get("id")
+                    or lbl
+                )
                 entities.append(
                     EntitySummary(
                         name=str(name),
                         type=str(lbl),
-                        details=f"Graph node identified in case {case_id[:8]}",
+                        details=f"Graph entity linked to case {case_id[:8]}",
                     )
                 )
     except Exception as exc:
-        logger.info("Neo4j not connected for report generation, using simulated graph entities: %s", exc)
+        logger.info("Neo4j unavailable for report generation: %s", exc)
 
-    if not entities:
-        entities = [
-            EntitySummary(name="phantom_x", type="Suspect", details="Target handle active on Telegram and Darknet forums."),
-            EntitySummary(name="Victim A (14F)", type="Victim", details="Identified minor target subjected to isolation tactics."),
-            EntitySummary(name="@phantom_tg", type="Account", details="Telegram Account linked to IP 198.51.100.42."),
-            EntitySummary(name="School Zone – Portland, OR", type="Location", details="Environmental match from YOLO image OCR context."),
-        ]
-
-    # 2. Fetch top vector hits from Qdrant if available
+    # 4. Fetch top vector hits from Qdrant
     top_evidence: List[EvidenceItem] = []
     try:
         qdrant = get_qdrant_client()
@@ -108,70 +146,87 @@ async def generate_ai_report(payload: ReportRequest):
             results = await qdrant.search(
                 collection_name="investigation_evidence",
                 query_vector=[0.1] * 384,
-                limit=3,
+                limit=10,
             )
+            # Filter by case_id in Python since filter syntax varies by SDK version
+            results = [r for r in results if (r.payload or {}).get("case_id") == case_id][:5]
             for res in results:
                 p = res.payload or {}
                 top_evidence.append(
                     EvidenceItem(
-                        source=p.get("source", "Qdrant Vector DB"),
+                        source=p.get("source", "Vector DB"),
                         content=p.get("text", "Evidence item"),
                         relevance_score=round(float(res.score), 2),
                     )
                 )
     except Exception as exc:
-        logger.info("Qdrant not connected for report generation, using simulated evidence hits: %s", exc)
+        logger.info("Qdrant unavailable for report generation: %s", exc)
 
-    if not top_evidence:
-        top_evidence = [
-            EvidenceItem(
-                source="Telegram Chat Log (Message #104)",
-                content="Trust me, don't tell your parents about our chat.",
-                relevance_score=0.96,
-            ),
-            EvidenceItem(
-                source="Vision Object & OCR Analysis (IMG_3847.jpg)",
-                content="YOLO object 'school uniform' matched with OCR text 'Bus Stop Line 4'",
-                relevance_score=0.92,
-            ),
-            EvidenceItem(
-                source="OSINT Breach Intelligence",
-                content="IP 198.51.100.42 resolves to VPN Exit node in Frankfurt, DE associated with breach ID #8841.",
-                relevance_score=0.88,
-            ),
-        ]
+    # 5. Build dynamic report content from real data
 
-    # 3. Construct structured AI summary
+    # Executive summary
+    graph_note = f" {len(entities)} entity nodes mapped in the relationship graph." if entities else ""
+    vector_note = f" {len(top_evidence)} evidence vectors retrieved from semantic index." if top_evidence else ""
+    file_type_note = f" Evidence types ingested: {', '.join(file_types)}." if file_types else ""
+
     executive_summary = (
-        f"Forensic multi-agent analysis for case '{case_title}' ({case_id}) has identified a CRITICAL risk level "
-        "with active grooming progression across 4 distinct phases (Trust Building, Isolation, Secrecy, and Sexualization). "
-        "Cross-modal fusion correlated victim chat transcripts with computer vision object detections (school uniform) "
-        "and EasyOCR location text (Bus Stop Line 4) to establish physical geographic proximity risk."
+        f"Forensic analysis for case '{case_title}' (ID: {case_id[:8]}…) — "
+        f"risk classification: {risk_level}. "
+        f"{evidence_count} evidence item(s) on record; "
+        f"{processed_count} processed, {pending_count} pending."
+        f"{file_type_note}{graph_note}{vector_note}"
     )
 
-    key_findings = [
-        "Identified suspect handle 'phantom_x' employing sliding-window isolation tactics on Telegram.",
-        "Computer vision model detected 'school uniform' correlated with OCR text 'Bus Stop Line 4'.",
-        "Synthetic media analysis evaluated image artifacts with 0.85 AI-generation probability.",
-        "OSINT query returned 2 public breach records matching suspect email 'suspect@darknet.org'.",
-        "Neo4j relationship graph established direct communication edges between Suspect Account (@phantom_tg) and Victim Account (@victim_a_tg).",
-    ]
+    # Key findings from real data
+    key_findings: List[str] = []
+    if evidence_count > 0:
+        key_findings.append(
+            f"{evidence_count} evidence file(s) ingested — {processed_count} fully processed, {pending_count} awaiting extraction."
+        )
+    if file_types:
+        key_findings.append(f"Evidence modalities detected: {', '.join(file_types)}.")
+    if entities:
+        type_counts: Dict[str, int] = {}
+        for e in entities:
+            type_counts[e.type] = type_counts.get(e.type, 0) + 1
+        entity_summary = ", ".join(f"{v} {k}(s)" for k, v in type_counts.items())
+        key_findings.append(f"Knowledge graph contains {len(entities)} entities: {entity_summary}.")
+    if top_evidence:
+        key_findings.append(
+            f"Semantic vector search returned {len(top_evidence)} relevant evidence hits."
+        )
+    if evidence_count == 0 and not entities:
+        key_findings.append("No evidence has been ingested yet. Upload evidence files to begin analysis.")
 
-    grooming_stages = ["Trust Building", "Isolation", "Secrecy", "Sexualization"]
+    # Grooming stages: only populated if evidence/entities suggest it
+    grooming_stages: List[str] = []
+    if evidence_count > 0 or entities:
+        # These would be derived from actual ML agent analysis in production
+        # For now surface only what evidence suggests
+        grooming_stages = ["Analysis pending — run LangGraph agents for stage detection."]
 
-    recommendations = [
-        "Issue emergency law enforcement warrant for IP 198.51.100.42 and ISP connection logs.",
-        "Dispatch physical protective patrol to Portland school bus stop zone (Line 4).",
-        "Preserve full chain-of-custody cryptographic hashes for chat export JSON and image IMG_3847.jpg.",
-        "Initiate subpoena for Telegram account metadata associated with handle '@phantom_tg'.",
-    ]
+    # Recommendations based on current state
+    recommendations: List[str] = []
+    if pending_count > 0:
+        recommendations.append(
+            f"Ensure Celery worker is running — {pending_count} evidence file(s) are still in 'pending' status."
+        )
+    if evidence_count == 0:
+        recommendations.append("Upload forensic evidence files (chat logs, images, documents) to begin analysis.")
+    if not entities:
+        recommendations.append("Run the LangGraph agent pipeline to populate the Neo4j knowledge graph with entities.")
+    if not top_evidence:
+        recommendations.append("Run the ML extraction pipeline to index evidence into Qdrant for semantic search.")
+    recommendations.append(
+        f"Preserve chain-of-custody SHA-256 hashes for all {evidence_count} evidence records in case {case_id[:8]}."
+    )
 
     return AiReportResponse(
         case_id=case_id,
         case_title=case_title,
         generated_at=now_iso,
-        risk_level="CRITICAL",
-        risk_score=88.5,
+        risk_level=risk_level,
+        risk_score=risk_score,
         executive_summary=executive_summary,
         key_findings=key_findings,
         grooming_stages_detected=grooming_stages,

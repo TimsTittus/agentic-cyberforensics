@@ -37,73 +37,15 @@ class CaseResponse(BaseModel):
     created_at: str
     updated_at: Optional[str] = None
 
-INITIAL_SEED_CASES = [
-    {
-        "id": uuid.UUID("550e8400-e29b-41d4-a716-446655440000"),
-        "title": "Operation Nighthawk – Telegram Network",
-        "status": "in_progress",
-        "risk_level": "critical",
-    },
-    {
-        "id": uuid.UUID("660e8400-e29b-41d4-a716-446655440001"),
-        "title": "Case Bravo – Discord Server Infiltration",
-        "status": "open",
-        "risk_level": "high",
-    },
-    {
-        "id": uuid.UUID("770e8400-e29b-41d4-a716-446655440002"),
-        "title": "Operation Sentinel – Image Forensics Cluster",
-        "status": "in_progress",
-        "risk_level": "high",
-    },
-    {
-        "id": uuid.UUID("880e8400-e29b-41d4-a716-446655440003"),
-        "title": "Case Delta – Encrypted Channel Analysis",
-        "status": "open",
-        "risk_level": "medium",
-    },
-    {
-        "id": uuid.UUID("990e8400-e29b-41d4-a716-446655440004"),
-        "title": "Operation Phantom – Dark Web Marketplace",
-        "status": "in_progress",
-        "risk_level": "critical",
-    },
-    {
-        "id": uuid.UUID("aa0e8400-e29b-41d4-a716-446655440005"),
-        "title": "Case Echo – Social Engineering Vector",
-        "status": "closed",
-        "risk_level": "low",
-    },
-]
-
 @router.get(
     "/cases",
     response_model=List[CaseResponse],
     summary="List all cases",
 )
 async def list_cases(db: AsyncSession = Depends(get_db_session)):
-    """Fetch all cases ordered by creation date descending. Auto-seeds missing baseline cases."""
+    """Fetch all cases ordered by creation date descending."""
     result = await db.execute(select(Case).order_by(Case.created_at.desc()))
     cases = list(result.scalars().all())
-    
-    existing_ids = {c.id for c in cases}
-    seeded = False
-    for seed in INITIAL_SEED_CASES:
-        if seed["id"] not in existing_ids:
-            db.add(
-                Case(
-                    id=seed["id"],
-                    title=seed["title"],
-                    status=seed["status"],
-                    risk_level=seed["risk_level"],
-                )
-            )
-            seeded = True
-
-    if seeded:
-        await db.commit()
-        result = await db.execute(select(Case).order_by(Case.created_at.desc()))
-        cases = list(result.scalars().all())
 
     return [
         CaseResponse(

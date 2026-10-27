@@ -85,7 +85,7 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<"cases" | "graph" | "execution" | "evidence" | "workspace">("cases");
 
   // Semantic Search state
-  const [searchQuery, setSearchQuery] = useState("school bus stop uniform");
+  const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
@@ -100,7 +100,8 @@ export default function DashboardPage() {
   const [newCaseRisk, setNewCaseRisk] = useState("high");
   const [newCaseFiles, setNewCaseFiles] = useState<File[]>([]);
   const [isCreatingCase, setIsCreatingCase] = useState(false);
-  const [selectedCaseId, setSelectedCaseId] = useState<string>("550e8400-e29b-41d4-a716-446655440000");
+  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   // Case Workspace state
   const [caseEvidence, setCaseEvidence] = useState<any[]>([]);
@@ -117,7 +118,9 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    fetchCases().then(setCases);
+    fetchCases()
+      .then(setCases)
+      .catch((err) => setApiError(String(err.message || err)));
   }, []);
 
   const fetchEvidenceForCase = async (caseId: string) => {
@@ -133,9 +136,7 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    if (selectedCaseId) {
-      fetchEvidenceForCase(selectedCaseId);
-    }
+    if (selectedCaseId) fetchEvidenceForCase(selectedCaseId);
   }, [selectedCaseId]);
 
   const handleCreateCaseSubmit = async (e: React.FormEvent) => {
@@ -143,6 +144,7 @@ export default function DashboardPage() {
     if (!newCaseTitle.trim()) return;
     setIsCreatingCase(true);
     try {
+      setApiError(null);
       const created = await createCase(newCaseTitle, newCaseRisk);
       if (newCaseFiles.length > 0) {
         await Promise.all(newCaseFiles.map((file) => uploadEvidence(created.id, file)));
@@ -154,8 +156,8 @@ export default function DashboardPage() {
       setShowNewCaseModal(false);
       setNewCaseTitle("");
       setNewCaseFiles([]);
-    } catch {
-      // Fallback
+    } catch (err: any) {
+      setApiError(err?.message || "Failed to create case. Is the backend running?");
     } finally {
       setIsCreatingCase(false);
     }
@@ -166,9 +168,11 @@ export default function DashboardPage() {
     if (!searchQuery.trim()) return;
     setIsSearching(true);
     try {
+      setApiError(null);
       const res = await searchEvidence(searchQuery);
       setSearchResults(res.hits);
-    } catch {
+    } catch (err: any) {
+      setApiError(err?.message || "Search failed.");
       setSearchResults([]);
     } finally {
       setIsSearching(false);
@@ -178,11 +182,12 @@ export default function DashboardPage() {
   const handleGenerateReport = async (caseId: string, caseTitle?: string) => {
     setIsGeneratingReport(true);
     try {
+      setApiError(null);
       const res = await generateAiReport(caseId, caseTitle);
       setReport(res);
       setShowReportModal(true);
-    } catch {
-      // Fallback
+    } catch (err: any) {
+      setApiError(err?.message || "Failed to generate report.");
     } finally {
       setIsGeneratingReport(false);
     }
@@ -339,12 +344,13 @@ export default function DashboardPage() {
 
             <button
               onClick={() =>
+                selectedCaseId &&
                 handleGenerateReport(
                   selectedCaseId,
-                  cases.find((c) => c.id === selectedCaseId)?.title || "Operation Nighthawk – Telegram Network"
+                  cases.find((c) => c.id === selectedCaseId)?.title || ""
                 )
               }
-              disabled={isGeneratingReport}
+              disabled={isGeneratingReport || !selectedCaseId}
               className="px-4 py-2.5 rounded-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white text-xs font-semibold shadow-md shadow-indigo-600/20 flex items-center gap-2 transition-all"
             >
               <Sparkles className="w-3.5 h-3.5" />
@@ -355,6 +361,17 @@ export default function DashboardPage() {
 
         {/* Dashboard Body */}
         <main className="p-8 space-y-8 flex-1 overflow-y-auto">
+          {/* API Error Banner */}
+          {apiError && (
+            <div className="flex items-start gap-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl px-5 py-4 text-sm">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <span className="flex-1">{apiError}</span>
+              <button onClick={() => setApiError(null)} className="text-rose-400 hover:text-rose-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           {/* Pastel Metric Cards Row */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <div className="glass-card-pastel-rose rounded-3xl p-5 flex flex-col justify-between transition-transform duration-300 hover:-translate-y-1">
@@ -720,12 +737,13 @@ export default function DashboardPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() =>
+                      selectedCaseId &&
                       handleGenerateReport(
                         selectedCaseId,
                         cases.find((c) => c.id === selectedCaseId)?.title || ""
                       )
                     }
-                    disabled={isGeneratingReport}
+                    disabled={isGeneratingReport || !selectedCaseId}
                     className="px-4 py-2.5 rounded-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white text-xs font-semibold shadow-md flex items-center gap-1.5 transition-all"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
@@ -823,7 +841,7 @@ export default function DashboardPage() {
                                     e.stopPropagation();
                                     if (confirm(`Are you sure you want to delete "${ev.file_path.split("/").pop()}"?`)) {
                                       await deleteEvidence(ev.id);
-                                      fetchEvidenceForCase(selectedCaseId);
+                                      if (selectedCaseId) fetchEvidenceForCase(selectedCaseId);
                                     }
                                   }}
                                   className="p-1 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-500 transition-colors"
@@ -869,6 +887,7 @@ export default function DashboardPage() {
                             onChange={async (e) => {
                               if (e.target.files && e.target.files.length > 0) {
                                 const filesArray = Array.from(e.target.files);
+                                if (!selectedCaseId) return;
                                 await Promise.all(
                                   filesArray.map((file) => uploadEvidence(selectedCaseId, file))
                                 );
@@ -976,12 +995,13 @@ export default function DashboardPage() {
                         <div className="flex justify-end">
                           <button
                             onClick={() =>
+                              selectedCaseId &&
                               handleGenerateReport(
                                 selectedCaseId,
                                 cases.find((c) => c.id === selectedCaseId)?.title || ""
                               )
                             }
-                            disabled={isGeneratingReport}
+                            disabled={isGeneratingReport || !selectedCaseId}
                             className="px-5 py-2.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-md shadow-slate-900/10 flex items-center gap-1.5 transition-all"
                           >
                             <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
@@ -993,7 +1013,7 @@ export default function DashboardPage() {
                   )}
 
                   {workspaceSubTab === "execution" && (
-                    <LiveExecution caseId={selectedCaseId} onCrossCaseMatch={handleCrossCaseMatch} />
+                    <LiveExecution caseId={selectedCaseId!} onCrossCaseMatch={handleCrossCaseMatch} />
                   )}
 
                   {workspaceSubTab === "graph" && (
@@ -1032,9 +1052,11 @@ export default function DashboardPage() {
                             if (!searchQuery.trim()) return;
                             setIsSearching(true);
                             try {
-                              const res = await searchEvidence(searchQuery, selectedCaseId);
+                              setApiError(null);
+                              const res = await searchEvidence(searchQuery, selectedCaseId ?? undefined);
                               setSearchResults(res.hits);
-                            } catch {
+                            } catch (err: any) {
+                              setApiError(err?.message || "Search failed.");
                               setSearchResults([]);
                             } finally {
                               setIsSearching(false);
