@@ -89,28 +89,44 @@ async def _execute_vector_search(query: str, case_id: Optional[str], limit: int)
             logger.info("Qdrant collection '%s' does not exist yet — no evidence indexed.", collection_name)
             return SearchResponse(query=query, total_hits=0, hits=[])
 
-        # Search Qdrant
-        results = await qdrant.search(
-            collection_name=collection_name,
-            query_vector=query_vector,
-            limit=limit,
-        )
+        # Hit the version-stable REST endpoint directly (works on both the
+        # 1.8 server image and the 1.18 client); the client's own search()
+        # was removed and query_points() requires Qdrant >= 1.10.
+        import os as _os
+        import httpx
+        qdrant_host = _os.getenv("QDRANT_HOST", "localhost")
+        if qdrant_host == "qdrant":
+            qdrant_host = "localhost"
+        qdrant_port = int(_os.getenv("QDRANT_PORT", "6333"))
+
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            r = await http.post(
+                f"http://{qdrant_host}:{qdrant_port}/collections/{collection_name}/points/search",
+                json={
+                    "vector": query_vector,
+                    "limit": max(limit, 20),
+                    "with_payload": True,
+                },
+            )
+            r.raise_for_status()
+            raw = r.json().get("result", [])
 
         hits: List[SearchHit] = []
-        for res in results:
-            payload = res.payload or {}
-            # Filter by case_id if provided
+        for res in raw:
+            payload = res.get("payload") or {}
             if case_id and payload.get("case_id") != case_id:
                 continue
             hits.append(
                 SearchHit(
-                    id=str(res.id),
-                    score=round(float(res.score), 4),
+                    id=str(res.get("id")),
+                    score=round(float(res.get("score", 0.0)), 4),
                     text=payload.get("text", "No text payload"),
                     case_id=payload.get("case_id", case_id or "unknown"),
                     source=payload.get("source", "Qdrant Vector DB"),
                 )
             )
+            if len(hits) >= limit:
+                break
 
         return SearchResponse(query=query, total_hits=len(hits), hits=hits)
 

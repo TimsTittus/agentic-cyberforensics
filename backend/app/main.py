@@ -34,6 +34,7 @@ from app.core.database import (
     disconnect_qdrant,
     disconnect_redis,
     get_async_engine,
+    mark_postgres_available,
 )
 from app.models.schemas import Base
 
@@ -67,6 +68,7 @@ async def lifespan(app: FastAPI):
         engine: AsyncEngine = get_async_engine()
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        mark_postgres_available()
         logger.info("PostgreSQL tables verified/created.")
     except Exception as exc:
         logger.warning("PostgreSQL unavailable — running in standalone mode: %s", exc)
@@ -121,3 +123,8 @@ async def root():
         "docs": "/docs",
         "health": "/api/v1/health",
     }
+
+@app.get("/health", tags=["health"])
+async def root_health():
+    """Root-level health check — returns basic liveness status."""
+    return {"status": "ok"}

@@ -34,11 +34,12 @@ logger = logging.getLogger(__name__)
 
 _async_engine: AsyncEngine | None = None
 _async_session_factory: async_sessionmaker[AsyncSession] | None = None
+_postgres_available: bool = False
 
 
 async def connect_postgres() -> None:
     """Create the async engine and session factory."""
-    global _async_engine, _async_session_factory
+    global _async_engine, _async_session_factory, _postgres_available
 
     settings = get_settings()
 
@@ -59,6 +60,7 @@ async def connect_postgres() -> None:
         class_=AsyncSession,
         expire_on_commit=False,
     )
+    _postgres_available = False
     logger.info("PostgreSQL async engine created.")
 
 async def disconnect_postgres() -> None:
@@ -77,10 +79,22 @@ def get_async_engine() -> AsyncEngine:
         raise RuntimeError("PostgreSQL engine not initialized. Call connect_postgres() first.")
     return _async_engine
 
+def mark_postgres_available() -> None:
+    """Mark PostgreSQL as verified-reachable after successful schema init."""
+    global _postgres_available
+    _postgres_available = True
+
+def is_postgres_available() -> bool:
+    return _postgres_available
+
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency — yields a scoped async session."""
-    if _async_session_factory is None:
-        raise RuntimeError("PostgreSQL session factory not initialized.")
+    if not _postgres_available or _async_session_factory is None:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=503,
+            detail="PostgreSQL is unavailable (standalone mode).",
+        )
     async with _async_session_factory() as session:
         try:
             yield session

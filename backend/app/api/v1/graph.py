@@ -82,27 +82,20 @@ async def get_intelligence_graph(
                         case_record = case_res.scalar_one_or_none()
                         
                         if case_record:
-                            # 1. Populate Case details and default Suspect / Victim
-                            seed_cypher = """
+                            # Populate Case node from PostgreSQL
+                            case_cypher = """
                             MERGE (c:Case {id: $case_id})
                             SET c.title = $title, c.status = $status, c.risk_level = $risk_level
-                            MERGE (s:Suspect {id: $suspect_id})
-                            SET s.handle = "suspect_target"
-                            MERGE (v:Victim {id: $victim_id})
-                            MERGE (c)-[:INVESTIGATES]->(s)
-                            MERGE (c)-[:INVESTIGATES]->(v)
                             """
                             await session.run(
-                                seed_cypher,
+                                case_cypher,
                                 case_id=case_id,
                                 title=case_record.title,
                                 status=case_record.status,
                                 risk_level=case_record.risk_level,
-                                suspect_id=f"suspect-{case_id}",
-                                victim_id=f"victim-{case_id}",
                             )
 
-                            # 2. Fetch and populate Evidence nodes
+                            # Fetch and populate Evidence nodes
                             ev_res = await db_session.execute(select(EvidenceModel).where(EvidenceModel.case_id == case_uuid))
                             evidence_list = ev_res.scalars().all()
                             
@@ -138,7 +131,11 @@ async def get_intelligence_graph(
                     node_id = str(n.element_id if hasattr(n, "element_id") else n.id if hasattr(n, "id") else n.get("id", str(hash(str(n)))))
                     labels = list(n.labels) if hasattr(n, "labels") else ["Node"]
                     primary_label = labels[0] if labels else "Node"
-                    display_name = n.get("filename") or n.get("name") or n.get("handle") or n.get("title") or n.get("id") or primary_label
+                    display_name = (
+                        n.get("filename") or n.get("name") or n.get("handle")
+                        or n.get("title") or n.get("label") or n.get("text")
+                        or n.get("id") or primary_label
+                    )
 
                     if node_id not in nodes_map:
                         nodes_map[node_id] = {
@@ -152,7 +149,11 @@ async def get_intelligence_graph(
                     m_id = str(m.element_id if hasattr(m, "element_id") else m.id if hasattr(m, "id") else m.get("id", str(hash(str(m)))))
                     m_labels = list(m.labels) if hasattr(m, "labels") else ["Node"]
                     m_primary = m_labels[0] if m_labels else "Node"
-                    m_display = m.get("filename") or m.get("name") or m.get("handle") or m.get("title") or m.get("id") or m_primary
+                    m_display = (
+                        m.get("filename") or m.get("name") or m.get("handle")
+                        or m.get("title") or m.get("label") or m.get("text")
+                        or m.get("id") or m_primary
+                    )
 
                     if m_id not in nodes_map:
                         nodes_map[m_id] = {

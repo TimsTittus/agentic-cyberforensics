@@ -22,6 +22,9 @@ from app.core.config import get_settings
 
 settings = get_settings()
 _REDIS_URL: str = settings.REDIS_URL
+# When run outside the docker network (local dev), fall back to the host port.
+if "redis://redis:6379" in _REDIS_URL or "@redis:" in _REDIS_URL:
+    _REDIS_URL = _REDIS_URL.replace("redis://redis:6379", "redis://localhost:6381").replace("@redis:", "@localhost:6381")
 
 celery_app = Celery("agentbruce")
 

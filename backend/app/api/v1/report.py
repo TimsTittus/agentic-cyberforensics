@@ -108,10 +108,11 @@ async def generate_ai_report(
         driver = get_neo4j_driver()
         async with driver.session() as session:
             cypher = """
-            MATCH (n)
-            WHERE n.case_id = $case_id OR n.caseId = $case_id
-            RETURN labels(n) AS labels, n.id AS id, n.handle AS handle,
-                   n.name AS name, n.platform_id AS platform_id
+            MATCH (c:Case {id: $case_id})-[*1..2]-(n)
+            WHERE n <> c
+            RETURN DISTINCT labels(n) AS labels, n.id AS id, n.handle AS handle,
+                   n.name AS name, n.platform_id AS platform_id,
+                   n.label AS label, n.text AS text, n.filename AS filename
             LIMIT 20
             """
             result = await session.run(cypher, case_id=case_id)
@@ -122,6 +123,9 @@ async def generate_ai_report(
                 name = (
                     rec.get("handle")
                     or rec.get("name")
+                    or rec.get("label")
+                    or rec.get("text")
+                    or rec.get("filename")
                     or rec.get("platform_id")
                     or rec.get("id")
                     or lbl
@@ -143,20 +147,29 @@ async def generate_ai_report(
         collections = await qdrant.get_collections()
         col_names = [c.name for c in collections.collections]
         if "investigation_evidence" in col_names:
-            results = await qdrant.search(
-                collection_name="investigation_evidence",
-                query_vector=[0.1] * 384,
-                limit=10,
-            )
-            # Filter by case_id in Python since filter syntax varies by SDK version
-            results = [r for r in results if (r.payload or {}).get("case_id") == case_id][:5]
-            for res in results:
-                p = res.payload or {}
+            import os as _os
+            import httpx
+            qh = _os.getenv("QDRANT_HOST", "localhost")
+            if qh == "qdrant":
+                qh = "localhost"
+            qp = int(_os.getenv("QDRANT_PORT", "6333"))
+
+            async with httpx.AsyncClient(timeout=10.0) as http:
+                r = await http.post(
+                    f"http://{qh}:{qp}/collections/investigation_evidence/points/search",
+                    json={"vector": [0.1] * 384, "limit": 25, "with_payload": True},
+                )
+                r.raise_for_status()
+                raw_hits = r.json().get("result", [])
+
+            raw_hits = [h for h in raw_hits if (h.get("payload") or {}).get("case_id") == case_id][:5]
+            for res in raw_hits:
+                p = res.get("payload") or {}
                 top_evidence.append(
                     EvidenceItem(
                         source=p.get("source", "Vector DB"),
                         content=p.get("text", "Evidence item"),
-                        relevance_score=round(float(res.score), 2),
+                        relevance_score=round(float(res.get("score", 0.0)), 2),
                     )
                 )
     except Exception as exc:

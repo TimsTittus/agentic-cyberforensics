@@ -106,8 +106,8 @@ class MetadataExtractor:
 
         file_size = os.path.getsize(file_path)
         ext = os.path.splitext(file_path)[1].lower()
-        mime, _ = mimetypes.guess_type(file_path)
-        mime = mime or file_type or "application/octet-stream"
+        guessed, _ = mimetypes.guess_type(file_path)
+        mime = (file_type or guessed or "application/octet-stream").lower()
 
         metadata: Dict[str, Any] = {
             "file_name": os.path.basename(file_path),
@@ -176,28 +176,42 @@ class VisionExtractor:
         objects: List[Dict[str, Any]] = []
         text_array: List[str] = []
 
-        # 1. YOLOv8 Object Detection
+        # Decode the image once via PIL so YOLO/EasyOCR do not reject the
+        # file over its on-disk extension (uploads are stored as `{sha256}.bin`).
+        pil_image = None
+        np_image = None
         try:
-            results = self.yolo_model(image_path, verbose=False)
-            for r in results:
-                boxes = r.boxes
-                for box in boxes:
-                    xyxy = box.xyxy[0].tolist()
-                    cls_id = int(box.cls[0].item())
-                    conf = float(box.conf[0].item())
-                    class_name = r.names.get(cls_id, str(cls_id))
-
-                    objects.append({
-                        "label": class_name,
-                        "confidence": round(conf, 4),
-                        "box": [round(c, 2) for c in xyxy],
-                    })
+            from PIL import Image
+            import numpy as np
+            pil_image = Image.open(image_path).convert("RGB")
+            np_image = np.array(pil_image)
         except Exception as e:
-            logger.error("YOLO object detection failed on %s: %s", image_path, e)
+            logger.error("Failed to decode image %s via PIL: %s", image_path, e)
 
-        # 2. EasyOCR Text Extraction
+        # 1. YOLOv8 Object Detection
+        if pil_image is not None:
+            try:
+                results = self.yolo_model(pil_image, verbose=False)
+                for r in results:
+                    boxes = r.boxes
+                    for box in boxes:
+                        xyxy = box.xyxy[0].tolist()
+                        cls_id = int(box.cls[0].item())
+                        conf = float(box.conf[0].item())
+                        class_name = r.names.get(cls_id, str(cls_id))
+
+                        objects.append({
+                            "label": class_name,
+                            "confidence": round(conf, 4),
+                            "box": [round(c, 2) for c in xyxy],
+                        })
+            except Exception as e:
+                logger.error("YOLO object detection failed on %s: %s", image_path, e)
+
+        # 2. EasyOCR Text Extraction (feed the decoded numpy array, not a path)
+        ocr_source = np_image if np_image is not None else image_path
         try:
-            ocr_results = self.ocr_reader.readtext(image_path)
+            ocr_results = self.ocr_reader.readtext(ocr_source)
             for bbox, text, prob in ocr_results:
                 clean_text = str(text).strip()
                 if clean_text:
@@ -296,8 +310,10 @@ def process_file(file_path: str, file_type: Optional[str] = None) -> Dict[str, A
         raise FileNotFoundError(f"File not found: {file_path}")
 
     ext = os.path.splitext(file_path)[1].lower()
-    mime, _ = mimetypes.guess_type(file_path)
-    mime = mime or file_type or ""
+    guessed_mime, _ = mimetypes.guess_type(file_path)
+    # The upload stores files as {sha256}.bin, so trust the caller-supplied
+    # file_type (the real MIME from the HTTP upload) above a filename guess.
+    mime = (file_type or guessed_mime or "").lower()
 
     # Extract metadata first for all files
     metadata = _metadata_extractor.extract(file_path, file_type=file_type)

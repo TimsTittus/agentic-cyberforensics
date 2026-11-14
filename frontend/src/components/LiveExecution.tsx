@@ -44,66 +44,12 @@ export default function LiveExecution({ caseId, onCrossCaseMatch }: { caseId: st
   const [executionLog, setExecutionLog] = useState<string[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
 
-  const startSimulatedExecution = useCallback(() => {
-    setIsExecuting(true);
-    setExecutionLog(["[00:00.0] Initializing multi-agent LangGraph execution pipeline..."]);
-    setAgents(INITIAL_AGENTS.map((a) => ({ ...a, status: "idle", details: undefined })));
-
-    let currentStep = 0;
-    const interval = setInterval(() => {
-      if (currentStep >= INITIAL_AGENTS.length) {
-        clearInterval(interval);
-        setIsExecuting(false);
-        setExecutionLog((prev) => [
-          ...prev,
-          "[00:04.2] Pipeline finished. Neo4j graph & Qdrant vectors updated.",
-        ]);
-        return;
-      }
-
-      const activeAgent = INITIAL_AGENTS[currentStep];
-
-      setAgents((prev) =>
-        prev.map((a, idx) => {
-          if (idx < currentStep) return { ...a, status: "completed" };
-          if (idx === currentStep) {
-            let details = "Processing payload...";
-            let flagsCount = undefined;
-            let syntheticProb = undefined;
-            let riskScore = undefined;
-
-            if (a.id === "grooming_agent") {
-              details = "Identified 4 grooming indicators (Trust, Isolation, Secrecy, Sexualization)";
-              flagsCount = 4;
-            } else if (a.id === "multimedia_agent") {
-              details = "Matched YOLO 'school uniform' with EasyOCR 'Bus Stop Line 4'";
-              flagsCount = 2;
-            } else if (a.id === "synthetic_agent") {
-              details = "Detected GAN noise distribution anomaly";
-              syntheticProb = 0.85;
-            } else if (a.id === "osint_agent") {
-              details = "Found 2 breach records for suspect@darknet.org";
-              flagsCount = 2;
-            } else if (a.id === "fusion_agent") {
-              details = "Upserted 384d vectors to Qdrant & merged Cypher nodes in Neo4j";
-            } else if (a.id === "risk_agent") {
-              details = "Calculated final Threat Score: 88.5 / 100 (CRITICAL)";
-              riskScore = 88.5;
-            }
-
-            return { ...a, status: "running", details, flagsCount, syntheticProb, riskScore };
-          }
-          return a;
-        })
-      );
-
-      setExecutionLog((prev) => [
-        ...prev,
-        `[${new Date().toLocaleTimeString()}] Executing node: ${activeAgent.name}...`,
-      ]);
-
-      currentStep++;
-    }, 700);
+  const handleWsUnavailable = useCallback(() => {
+    setIsExecuting(false);
+    setExecutionLog((prev) => [
+      ...prev,
+      "[ERROR] WebSocket connection failed. Ensure the backend server is running on port 8000.",
+    ]);
   }, []);
 
   const triggerExecution = useCallback(() => {
@@ -157,13 +103,13 @@ export default function LiveExecution({ caseId, onCrossCaseMatch }: { caseId: st
 
       ws.onerror = () => {
         setWsConnected(false);
-        startSimulatedExecution();
+        handleWsUnavailable();
       };
     } catch {
       setWsConnected(false);
-      startSimulatedExecution();
+      handleWsUnavailable();
     }
-  }, [caseId, isExecuting, startSimulatedExecution, onCrossCaseMatch]);
+  }, [caseId, isExecuting, handleWsUnavailable, onCrossCaseMatch]);
 
   useEffect(() => {
     return () => {

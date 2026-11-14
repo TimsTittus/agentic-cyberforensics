@@ -42,6 +42,7 @@ import {
   deleteEvidence,
   searchEvidence,
   generateAiReport,
+  fetchGraphData,
   type CaseData,
   type SearchHit,
   type AiReport,
@@ -77,6 +78,145 @@ function formatDate(dateStr: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function CaseExecutiveOverview({
+  caseId,
+  caseTitle,
+  onGenerateReport,
+  isGeneratingReport,
+}: {
+  caseId: string;
+  caseTitle: string;
+  onGenerateReport: () => void;
+  isGeneratingReport: boolean;
+}) {
+  const [riskScore, setRiskScore] = useState<number | null>(null);
+  const [graphNodeCount, setGraphNodeCount] = useState<number | null>(null);
+  const [graphLinkCount, setGraphLinkCount] = useState<number | null>(null);
+  const [findings, setFindings] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+
+    const loadData = async () => {
+      try {
+        const report = await generateAiReport(caseId, caseTitle);
+        if (cancelled) return;
+        setRiskScore(report.risk_score);
+        setFindings(report.key_findings);
+      } catch {
+        if (cancelled) return;
+        setRiskScore(null);
+        setFindings([]);
+      }
+
+      try {
+        const graph = await fetchGraphData(caseId);
+        if (cancelled) return;
+        setGraphNodeCount(graph.nodes.length);
+        setGraphLinkCount(graph.links.length);
+      } catch {
+        if (cancelled) return;
+        setGraphNodeCount(null);
+        setGraphLinkCount(null);
+      }
+
+      if (!cancelled) setLoading(false);
+    };
+
+    loadData();
+    return () => { cancelled = true; };
+  }, [caseId, caseTitle]);
+
+  return (
+    <Card className="rounded-3xl border-white bg-white/70 backdrop-blur-md shadow-sm">
+      <CardHeader>
+        <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+          <Eye className="w-4 h-4 text-indigo-600" />
+          Executive Investigation Overview
+        </CardTitle>
+        <CardDescription>
+          Automated threat summary & system telemetry metrics
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6 pt-2">
+        {loading ? (
+          <div className="text-center py-12 text-sm text-slate-400 animate-pulse">
+            Loading case telemetry from database...
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100 flex flex-col justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600">
+                  Threat Assessment Matrix
+                </span>
+                <div className="py-3">
+                  <p className="text-4xl font-extrabold text-indigo-900">
+                    {riskScore !== null ? riskScore : "—"}
+                  </p>
+                  <p className="text-xs text-indigo-700/80 mt-1 font-semibold">
+                    Synthesized Risk Score (0-100)
+                  </p>
+                </div>
+                <span className="text-[10px] text-slate-400">
+                  {graphNodeCount !== null
+                    ? `Calculated across ${graphNodeCount} forensic nodes`
+                    : "No graph data available yet"}
+                </span>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-purple-50/50 border border-purple-100 flex flex-col justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600">
+                  Cognitive Graph Links
+                </span>
+                <div className="py-3">
+                  <p className="text-4xl font-extrabold text-purple-900">
+                    {graphLinkCount !== null ? graphLinkCount : "—"}
+                  </p>
+                  <p className="text-xs text-purple-700/80 mt-1 font-semibold">
+                    Tracked Entity Associations
+                  </p>
+                </div>
+                <span className="text-[10px] text-slate-400">
+                  Persisted inside Neo4j topology DB
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Analytical Summary Findings
+              </h4>
+              <div className="p-4 rounded-2xl border border-slate-200/80 bg-white/95 text-xs text-slate-600 space-y-2 leading-relaxed">
+                {findings.length > 0 ? (
+                  findings.map((f, i) => <p key={i}>{f}</p>)
+                ) : (
+                  <p className="italic text-slate-400">
+                    No findings yet. Upload evidence and run the AI pipeline to generate analysis.
+                  </p>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
+        <div className="flex justify-end">
+          <button
+            onClick={onGenerateReport}
+            disabled={isGeneratingReport}
+            className="px-5 py-2.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-md shadow-slate-900/10 flex items-center gap-1.5 transition-all"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
+            Run AI Case Evaluation Report
+          </button>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function DashboardPage() {
@@ -123,21 +263,47 @@ export default function DashboardPage() {
       .catch((err) => setApiError(String(err.message || err)));
   }, []);
 
-  const fetchEvidenceForCase = async (caseId: string) => {
-    setIsLoadingEvidence(true);
+  const [evidencePollTrigger, setEvidencePollTrigger] = useState(0);
+
+  const fetchEvidenceForCase = async (caseId: string, silent = false) => {
+    if (!silent) setIsLoadingEvidence(true);
     try {
       const items = await fetchCaseEvidence(caseId);
       setCaseEvidence(items);
+      return items;
     } catch {
       setCaseEvidence([]);
+      return [];
     } finally {
-      setIsLoadingEvidence(false);
+      if (!silent) setIsLoadingEvidence(false);
     }
   };
 
   useEffect(() => {
-    if (selectedCaseId) fetchEvidenceForCase(selectedCaseId);
-  }, [selectedCaseId]);
+    if (!selectedCaseId) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const tick = async (silent: boolean) => {
+      if (cancelled) return;
+      const items = await fetchEvidenceForCase(selectedCaseId, silent);
+      if (cancelled) return;
+      const anyActive = items.some(
+        (it: any) => it.processed_status === "pending" || it.processed_status === "processing"
+      );
+      if (anyActive) {
+        timer = setTimeout(() => tick(true), 3000);
+      }
+    };
+
+    tick(false);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [selectedCaseId, evidencePollTrigger]);
 
   const handleCreateCaseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -841,7 +1007,7 @@ export default function DashboardPage() {
                                     e.stopPropagation();
                                     if (confirm(`Are you sure you want to delete "${ev.file_path.split("/").pop()}"?`)) {
                                       await deleteEvidence(ev.id);
-                                      if (selectedCaseId) fetchEvidenceForCase(selectedCaseId);
+                                      if (selectedCaseId) setEvidencePollTrigger((n) => n + 1);
                                     }
                                   }}
                                   className="p-1 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-500 transition-colors"
@@ -891,7 +1057,7 @@ export default function DashboardPage() {
                                 await Promise.all(
                                   filesArray.map((file) => uploadEvidence(selectedCaseId, file))
                                 );
-                                fetchEvidenceForCase(selectedCaseId);
+                                setEvidencePollTrigger((n) => n + 1);
                               }
                             }}
                           />
@@ -935,81 +1101,18 @@ export default function DashboardPage() {
 
                   {/* Sub-tab Content mapping */}
                   {workspaceSubTab === "details" && (
-                    <Card className="rounded-3xl border-white bg-white/70 backdrop-blur-md shadow-sm">
-                      <CardHeader>
-                        <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
-                          <Eye className="w-4 h-4 text-indigo-600" />
-                          Executive Investigation Overview
-                        </CardTitle>
-                        <CardDescription>
-                          Automated threat summary & system telemetry metrics
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-6 pt-2">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100 flex flex-col justify-between">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600">
-                              Threat Assessment Matrix
-                            </span>
-                            <div className="py-3">
-                              <p className="text-4xl font-extrabold text-indigo-900">88.5</p>
-                              <p className="text-xs text-indigo-700/80 mt-1 font-semibold">
-                                Synthesized Risk Score (0-100)
-                              </p>
-                            </div>
-                            <span className="text-[10px] text-slate-400">
-                              Calculated across 8 forensic nodes
-                            </span>
-                          </div>
-
-                          <div className="p-4 rounded-2xl bg-purple-50/50 border border-purple-100 flex flex-col justify-between">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600">
-                              Cognitive Graph Links
-                            </span>
-                            <div className="py-3">
-                              <p className="text-4xl font-extrabold text-purple-900">24</p>
-                              <p className="text-xs text-purple-700/80 mt-1 font-semibold">
-                                Tracked Entity Associations
-                              </p>
-                            </div>
-                            <span className="text-[10px] text-slate-400">
-                              Persisted inside Neo4j topology DB
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="space-y-3">
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                            Analytical Summary Findings
-                          </h4>
-                          <div className="p-4 rounded-2xl border border-slate-200/80 bg-white/95 text-xs text-slate-600 space-y-2 leading-relaxed">
-                            <p>
-                              System detected high-risk patterns of trust formation and child isolation across digital communication evidence.
-                            </p>
-                            <p>
-                              OSINT breach records link the suspect's registered contact channels to known black-market breach credentials.
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex justify-end">
-                          <button
-                            onClick={() =>
-                              selectedCaseId &&
-                              handleGenerateReport(
-                                selectedCaseId,
-                                cases.find((c) => c.id === selectedCaseId)?.title || ""
-                              )
-                            }
-                            disabled={isGeneratingReport || !selectedCaseId}
-                            className="px-5 py-2.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-md shadow-slate-900/10 flex items-center gap-1.5 transition-all"
-                          >
-                            <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
-                            Run AI Case Evaluation Report
-                          </button>
-                        </div>
-                      </CardContent>
-                    </Card>
+                    <CaseExecutiveOverview
+                      caseId={selectedCaseId}
+                      caseTitle={cases.find((c) => c.id === selectedCaseId)?.title || ""}
+                      onGenerateReport={() =>
+                        selectedCaseId &&
+                        handleGenerateReport(
+                          selectedCaseId,
+                          cases.find((c) => c.id === selectedCaseId)?.title || ""
+                        )
+                      }
+                      isGeneratingReport={isGeneratingReport}
+                    />
                   )}
 
                   {workspaceSubTab === "execution" && (
