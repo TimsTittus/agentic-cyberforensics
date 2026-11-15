@@ -132,6 +132,38 @@ export async function searchEvidence(query: string, caseId?: string): Promise<Se
   return res.json();
 }
 
+export interface ExecutionLogEntry {
+  id?: string | null;
+  case_id?: string;
+  evidence_id?: string | null;
+  level: "debug" | "info" | "warn" | "error" | "success";
+  source: string;
+  message: string;
+  extra?: Record<string, unknown> | null;
+  created_at?: string;
+}
+
+export async function fetchExecutionLogs(
+  caseId: string,
+  opts: { limit?: number; after?: string } = {}
+): Promise<ExecutionLogEntry[]> {
+  const params = new URLSearchParams();
+  if (opts.limit) params.set("limit", String(opts.limit));
+  if (opts.after) params.set("after", opts.after);
+  const qs = params.toString();
+  const res = await fetch(
+    `${API_BASE}/api/v1/cases/${caseId}/execution-logs${qs ? `?${qs}` : ""}`,
+    { cache: "no-store" }
+  );
+  if (!res.ok) throw new Error(`Failed to fetch execution logs: HTTP ${res.status}`);
+  return res.json();
+}
+
+export function executionLogsWsUrl(caseId: string): string {
+  const wsBase = API_BASE.replace(/^http/, "ws");
+  return `${wsBase}/api/v1/ws/execution-logs/${caseId}`;
+}
+
 export async function generateAiReport(caseId: string, caseTitle?: string): Promise<AiReport> {
   const res = await fetch(`${API_BASE}/api/v1/report/generate`, {
     method: "POST",

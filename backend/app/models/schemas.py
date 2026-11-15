@@ -14,7 +14,9 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     String,
+    Text,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -145,6 +147,54 @@ class Evidence(Base):
 
     def __repr__(self) -> str:
         return f"<Evidence(id={self.id}, sha256='{self.sha256_hash[:12]}...', status='{self.processed_status}')>"
+
+
+class ExecutionLog(Base):
+    """
+    Append-only timeline of real pipeline events for a case:
+    ingestion, hashing, extraction, Qdrant/Neo4j indexing, errors, etc.
+
+    Powers the Live Execution terminal — history + live stream.
+    """
+
+    __tablename__ = "execution_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=func.gen_random_uuid(),
+    )
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    evidence_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    level: Mapped[str] = mapped_column(String(16), default="info", server_default="info")
+    source: Mapped[str] = mapped_column(String(64), default="system", server_default="system")
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        index=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "level IN ('debug', 'info', 'warn', 'error', 'success')",
+            name="ck_execution_logs_level",
+        ),
+        Index("ix_execution_logs_case_created", "case_id", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ExecutionLog(case={self.case_id}, level={self.level}, src={self.source})>"
 
 
 # ---------------------------------------------------------------------------

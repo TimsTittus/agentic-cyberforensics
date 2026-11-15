@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db_session
+from app.core.execution_log import emit_async
 from app.models.schemas import Case, Evidence
 from app.workers.tasks import route_evidence
 
@@ -70,6 +71,13 @@ async def upload_evidence(
             detail=f"Case {case_id} not found.",
         )
 
+    await emit_async(
+        str(case_id),
+        f"Evidence upload received — filename='{file.filename}', content_type={file.content_type or 'unknown'}",
+        level="info",
+        source="gateway",
+    )
+
     # 2. Stream-hash the file in chunks (prevents memory exhaustion)
     sha256_hasher = hashlib.sha256()
     buffer = BytesIO()
@@ -92,11 +100,25 @@ async def upload_evidence(
         case_id,
     )
 
+    await emit_async(
+        str(case_id),
+        f"Chain-of-custody SHA-256 computed: {sha256_hex[:16]}… ({file_size:,} bytes)",
+        level="info",
+        source="hash",
+        extra={"sha256": sha256_hex, "bytes": file_size},
+    )
+
     # 3. Reject duplicates based on SHA-256
     duplicate = await db.execute(
         select(Evidence).where(Evidence.sha256_hash == sha256_hex)
     )
     if duplicate.scalar_one_or_none() is not None:
+        await emit_async(
+            str(case_id),
+            f"Duplicate rejected: SHA-256 {sha256_hex[:16]}… already on record",
+            level="warn",
+            source="hash",
+        )
         raise HTTPException(
             status_code=409,
             detail=f"Duplicate evidence: SHA-256 {sha256_hex} already exists.",
@@ -117,6 +139,13 @@ async def upload_evidence(
             await out.write(chunk)
 
     logger.info("Evidence written to disk: %s", file_path)
+
+    await emit_async(
+        str(case_id),
+        f"Evidence persisted to {file_path}",
+        level="info",
+        source="storage",
+    )
 
     # 5. Insert Evidence record in PostgreSQL
     evidence = Evidence(
@@ -143,6 +172,15 @@ async def upload_evidence(
         "Celery task dispatched: task_id=%s  evidence_id=%s",
         task.id,
         evidence_id,
+    )
+
+    await emit_async(
+        str(case_id),
+        f"Celery task dispatched: task_id={task.id}, evidence_id={evidence_id}",
+        level="info",
+        source="celery",
+        evidence_id=str(evidence_id),
+        extra={"task_id": task.id},
     )
 
     # 7. Return chain-of-custody receipt
@@ -192,7 +230,19 @@ async def delete_evidence(
         logger.warning("Failed to delete Neo4j node for evidence %s: %s", evidence_id, neo_err)
 
     # 4. Remove from PostgreSQL
+    case_id_for_log = evidence.case_id
     await db.delete(evidence)
     await db.commit()
+
+    try:
+        await emit_async(
+            str(case_id_for_log),
+            f"Evidence {evidence_id} deleted (file + Postgres + Neo4j)",
+            level="warn",
+            source="gateway",
+            evidence_id=str(evidence_id),
+        )
+    except Exception:
+        pass
 
     return {"message": "Evidence deleted successfully."}

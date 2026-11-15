@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.v1.cases import router as cases_router
+from app.api.v1.execution_logs import router as execution_logs_router
 from app.api.v1.graph import router as graph_router
 from app.api.v1.health import router as health_router
 from app.api.v1.ingestion import router as ingestion_router
@@ -113,6 +114,7 @@ app.include_router(graph_router, prefix="/api/v1")
 app.include_router(ws_router, prefix="/api/v1")
 app.include_router(search_router, prefix="/api/v1")
 app.include_router(report_router, prefix="/api/v1")
+app.include_router(execution_logs_router, prefix="/api/v1")
 
 @app.get("/", tags=["root"])
 async def root():

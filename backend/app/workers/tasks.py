@@ -17,6 +17,7 @@ import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
 from app.core.celery_app import celery_app
+from app.core.execution_log import emit_sync
 from app.workers.extractors import process_file
 
 logger = logging.getLogger(__name__)
@@ -380,8 +381,38 @@ def route_evidence(self, evidence_id: str) -> dict:
             file_type,
         )
 
+        emit_sync(
+            case_id,
+            f"Processing started — {file_name} ({file_type or 'binary'})",
+            level="info",
+            source="worker",
+            evidence_id=evidence_id,
+        )
+
         # 1. Run ML extraction pipeline
+        emit_sync(
+            case_id,
+            f"Running extractor pipeline (OCR / YOLO / EXIF) on {file_name}",
+            level="info",
+            source="extractor",
+            evidence_id=evidence_id,
+        )
         artifact = process_file(file_path=file_path, file_type=file_type)
+
+        try:
+            objects_n = len(artifact.get("objects", []) or [])
+            text_len = len((artifact.get("text_content") or "").strip())
+            has_exif = bool((artifact.get("metadata") or {}).get("exif"))
+            emit_sync(
+                case_id,
+                f"Extractor finished — objects={objects_n}, text_chars={text_len}, exif={'yes' if has_exif else 'no'}",
+                level="success",
+                source="extractor",
+                evidence_id=evidence_id,
+                extra={"objects": objects_n, "text_chars": text_len, "exif": has_exif},
+            )
+        except Exception:
+            pass
 
         # 2. Embed and index text content into Qdrant
         ocr_snippets: List[str] = []
@@ -404,8 +435,23 @@ def route_evidence(self, evidence_id: str) -> dict:
                 text_content=artifact.get("text_content", "") or "",
                 ocr_snippets=ocr_snippets,
             )
+            emit_sync(
+                case_id,
+                f"Qdrant upsert complete — {qdrant_points} vectors indexed",
+                level="success" if qdrant_points else "info",
+                source="qdrant",
+                evidence_id=evidence_id,
+                extra={"vectors": qdrant_points},
+            )
         except Exception as exc:
             logger.error("Qdrant indexing failed for %s: %s", evidence_id, exc)
+            emit_sync(
+                case_id,
+                f"Qdrant indexing failed: {exc}",
+                level="error",
+                source="qdrant",
+                evidence_id=evidence_id,
+            )
 
         # 3. Write entities to Neo4j graph
         neo4j_entities = 0
@@ -418,8 +464,23 @@ def route_evidence(self, evidence_id: str) -> dict:
                 file_type=file_type,
                 artifact=artifact,
             )
+            emit_sync(
+                case_id,
+                f"Neo4j graph updated — {neo4j_entities} entities materialized",
+                level="success" if neo4j_entities else "info",
+                source="neo4j",
+                evidence_id=evidence_id,
+                extra={"entities": neo4j_entities},
+            )
         except Exception as exc:
             logger.error("Neo4j entity write failed for %s: %s", evidence_id, exc)
+            emit_sync(
+                case_id,
+                f"Neo4j write failed: {exc}",
+                level="error",
+                source="neo4j",
+                evidence_id=evidence_id,
+            )
 
         # 4. Enrich artifact with downstream counts, then persist
         artifact["pipeline"] = {
@@ -446,6 +507,15 @@ def route_evidence(self, evidence_id: str) -> dict:
             neo4j_entities,
         )
 
+        emit_sync(
+            case_id,
+            f"Evidence pipeline complete — {file_name} (qdrant={qdrant_points}, neo4j={neo4j_entities})",
+            level="success",
+            source="worker",
+            evidence_id=evidence_id,
+            extra={"qdrant": qdrant_points, "neo4j": neo4j_entities},
+        )
+
         return {
             "evidence_id": evidence_id,
             "file_path": file_path,
@@ -456,20 +526,37 @@ def route_evidence(self, evidence_id: str) -> dict:
 
     except Exception as exc:
         logger.error("route_evidence failed for %s: %s", evidence_id, exc, exc_info=True)
+        case_id_for_log: Optional[str] = None
         if conn is not None:
             try:
-                with conn.cursor() as cur:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute(
                         """
                         UPDATE evidence
                            SET processed_status = 'failed'
                          WHERE id = %s
+                     RETURNING case_id
                         """,
                         (evidence_id,),
                     )
+                    r = cur.fetchone()
+                    if r and r.get("case_id"):
+                        case_id_for_log = str(r["case_id"])
                     conn.commit()
             except Exception as update_err:
                 logger.error("Failed to set status to 'failed' for %s: %s", evidence_id, update_err)
+
+        if case_id_for_log:
+            try:
+                emit_sync(
+                    case_id_for_log,
+                    f"Pipeline failed for evidence {evidence_id}: {exc}",
+                    level="error",
+                    source="worker",
+                    evidence_id=evidence_id,
+                )
+            except Exception:
+                pass
 
         raise self.retry(exc=exc, countdown=5)
 

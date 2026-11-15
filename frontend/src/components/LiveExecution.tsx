@@ -1,128 +1,253 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
-  CheckCircle2,
-  Clock,
-  Play,
-  RotateCcw,
-  Sparkles,
-  ShieldAlert,
-  Zap,
-  Layers,
   Cpu,
+  Download,
+  Radio,
+  RotateCcw,
+  Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  executionLogsWsUrl,
+  fetchExecutionLogs,
+  type ExecutionLogEntry,
+} from "@/lib/api";
 
-interface AgentStepStatus {
-  id: string;
-  name: string;
-  category: string;
-  status: "idle" | "running" | "completed" | "error";
-  details?: string;
-  flagsCount?: number;
-  syntheticProb?: number;
-  riskScore?: number;
+const SENTINEL_CASE_ID = "550e8400-e29b-41d4-a716-446655440000";
+
+interface Props {
+  caseId: string;
+  // Kept for parent-component API compatibility; real cross-case events arrive
+  // through the pipeline and will be surfaced here when the backend emits them.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onCrossCaseMatch?: (alerts: any[]) => void;
 }
 
-const INITIAL_AGENTS: AgentStepStatus[] = [
-  { id: "gateway", name: "Entry Gateway", category: "Ingestion", status: "idle" },
-  { id: "grooming_agent", name: "Grooming Detection Agent", category: "LLM Analytics", status: "idle" },
-  { id: "multimedia_agent", name: "Multimedia Context Agent", category: "Vision & OCR", status: "idle" },
-  { id: "synthetic_agent", name: "Synthetic Media Detector", category: "Deepfake Inspection", status: "idle" },
-  { id: "osint_agent", name: "OSINT Threat Agent", category: "Breach Lookup", status: "idle" },
-  { id: "timeline_agent", name: "Chronological Timeline", category: "Synthesis", status: "idle" },
-  { id: "fusion_agent", name: "Neo4j & Qdrant Fusion", category: "Knowledge Graph", status: "idle" },
-  { id: "risk_agent", name: "Risk Assessment Engine", category: "Scoring Matrix", status: "idle" },
-];
+function formatClock(iso?: string): string {
+  if (!iso) return new Date().toLocaleTimeString("en-US", { hour12: false });
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString("en-US", { hour12: false }) +
+    "." + String(d.getMilliseconds()).padStart(3, "0");
+}
 
-export default function LiveExecution({ caseId, onCrossCaseMatch }: { caseId: string; onCrossCaseMatch?: (alerts: any[]) => void }) {
-  const [agents, setAgents] = useState<AgentStepStatus[]>(INITIAL_AGENTS);
-  const [isExecuting, setIsExecuting] = useState(false);
+function levelClass(level: string): string {
+  switch (level) {
+    case "error":
+      return "text-rose-400";
+    case "warn":
+      return "text-amber-300";
+    case "success":
+      return "text-emerald-300";
+    case "debug":
+      return "text-slate-500";
+    default:
+      return "text-slate-200";
+  }
+}
+
+function sourceBadgeClass(source: string): string {
+  const map: Record<string, string> = {
+    gateway: "bg-indigo-500/20 text-indigo-300",
+    hash: "bg-purple-500/20 text-purple-300",
+    storage: "bg-slate-500/20 text-slate-300",
+    celery: "bg-cyan-500/20 text-cyan-300",
+    worker: "bg-sky-500/20 text-sky-300",
+    extractor: "bg-fuchsia-500/20 text-fuchsia-300",
+    qdrant: "bg-emerald-500/20 text-emerald-300",
+    neo4j: "bg-amber-500/20 text-amber-300",
+    stream: "bg-slate-500/20 text-slate-400",
+    system: "bg-slate-500/20 text-slate-300",
+  };
+  return map[source] || "bg-slate-500/20 text-slate-300";
+}
+
+export default function LiveExecution({ caseId }: Props) {
+  const [entries, setEntries] = useState<ExecutionLogEntry[]>([]);
   const [wsConnected, setWsConnected] = useState(false);
-  const [executionLog, setExecutionLog] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+
   const wsRef = useRef<WebSocket | null>(null);
+  const terminalRef = useRef<HTMLDivElement | null>(null);
+  const seenIds = useRef<Set<string>>(new Set());
 
-  const handleWsUnavailable = useCallback(() => {
-    setIsExecuting(false);
-    setExecutionLog((prev) => [
-      ...prev,
-      "[ERROR] WebSocket connection failed. Ensure the backend server is running on port 8000.",
-    ]);
+  const isPlaceholder = !caseId || caseId === SENTINEL_CASE_ID;
+
+  const pushEntry = useCallback((e: ExecutionLogEntry) => {
+    setEntries((prev) => {
+      const key = e.id || `${e.created_at || ""}|${e.source}|${e.message}`;
+      if (seenIds.current.has(key)) return prev;
+      seenIds.current.add(key);
+      return [...prev, e];
+    });
   }, []);
 
-  const triggerExecution = useCallback(() => {
-    if (isExecuting) return;
-
-    try {
-      const wsUrl = `ws://localhost:8000/api/v1/ws/investigation/${caseId}`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setWsConnected(true);
-        setIsExecuting(true);
-        setExecutionLog(["WebSocket connected. Streaming LangGraph state..."]);
-        setAgents(INITIAL_AGENTS.map((a) => ({ ...a, status: "idle" })));
-        ws.send(JSON.stringify({ case_id: caseId }));
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.event === "start") {
-            setExecutionLog((prev) => [...prev, `[Start] ${data.message}`]);
-          } else if (data.event === "step") {
-            const nodeName = data.node;
-            setAgents((prev) =>
-              prev.map((a) => {
-                if (a.id === nodeName) {
-                  return { ...a, status: "running", details: "State updated via WebSocket" };
-                }
-                return a;
-              })
-            );
-            setExecutionLog((prev) => [...prev, `[Step] Completed node: ${nodeName}`]);
-          } else if (data.event === "cross_case_match") {
-            // Phase 10: Cross-Case Serial Network alert
-            if (data.alerts && data.alerts.length > 0 && onCrossCaseMatch) {
-              onCrossCaseMatch(data.alerts);
-            }
-            setExecutionLog((prev) => [...prev, `[ALERT] Cross-case pattern detected: ${data.alerts?.length || 0} match(es)`]);
-          } else if (data.event === "complete") {
-            setIsExecuting(false);
-            setAgents((prev) => prev.map((a) => ({ ...a, status: "completed" })));
-            setExecutionLog((prev) => [...prev, `[Done] ${data.message}`]);
-            ws.close();
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      };
-
-      ws.onerror = () => {
-        setWsConnected(false);
-        handleWsUnavailable();
-      };
-    } catch {
-      setWsConnected(false);
-      handleWsUnavailable();
-    }
-  }, [caseId, isExecuting, handleWsUnavailable, onCrossCaseMatch]);
-
+  // Load history whenever the case changes.
   useEffect(() => {
-    return () => {
-      if (wsRef.current) wsRef.current.close();
-    };
-  }, []);
+    if (isPlaceholder) {
+      setEntries([]);
+      seenIds.current = new Set();
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    seenIds.current = new Set();
+    setEntries([]);
 
-  const completedCount = agents.filter((a) => a.status === "completed").length;
-  const progressPercent = Math.round((completedCount / agents.length) * 100);
+    fetchExecutionLogs(caseId, { limit: 1000 })
+      .then((rows) => {
+        if (cancelled) return;
+        rows.forEach(pushEntry);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err?.message || "Failed to load execution logs");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [caseId, isPlaceholder, pushEntry]);
+
+  // Live WebSocket subscription for this case.
+  useEffect(() => {
+    if (isPlaceholder) return;
+
+    let shouldReconnect = true;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      try {
+        const ws = new WebSocket(executionLogsWsUrl(caseId));
+        wsRef.current = ws;
+
+        ws.onopen = () => setWsConnected(true);
+
+        ws.onmessage = (evt) => {
+          try {
+            const parsed = JSON.parse(evt.data);
+            if (parsed && typeof parsed === "object" && "message" in parsed) {
+              pushEntry(parsed as ExecutionLogEntry);
+            }
+          } catch {
+            // Non-JSON frame — surface verbatim
+            pushEntry({
+              level: "info",
+              source: "stream",
+              message: String(evt.data),
+              created_at: new Date().toISOString(),
+            });
+          }
+        };
+
+        ws.onerror = () => {
+          setWsConnected(false);
+        };
+
+        ws.onclose = () => {
+          setWsConnected(false);
+          if (shouldReconnect) {
+            retryTimer = setTimeout(connect, 2500);
+          }
+        };
+      } catch (err: unknown) {
+        setWsConnected(false);
+        if (shouldReconnect) {
+          retryTimer = setTimeout(connect, 2500);
+        }
+      }
+    };
+
+    connect();
+
+    return () => {
+      shouldReconnect = false;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (wsRef.current) {
+        try {
+          wsRef.current.close();
+        } catch {
+          /* ignore */
+        }
+        wsRef.current = null;
+      }
+    };
+  }, [caseId, isPlaceholder, pushEntry]);
+
+  // Keep the terminal pinned to the bottom when new rows arrive.
+  useEffect(() => {
+    if (!autoScroll) return;
+    const el = terminalRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [entries, autoScroll]);
+
+  // Detect when the user scrolls away from the bottom — pause auto-scroll.
+  const handleScroll = () => {
+    const el = terminalRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    setAutoScroll(atBottom);
+  };
+
+  const refresh = useCallback(async () => {
+    if (isPlaceholder) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const rows = await fetchExecutionLogs(caseId, { limit: 1000 });
+      seenIds.current = new Set();
+      setEntries([]);
+      rows.forEach(pushEntry);
+    } catch (err: unknown) {
+      setError((err as Error)?.message || "Failed to reload logs");
+    } finally {
+      setLoading(false);
+    }
+  }, [caseId, isPlaceholder, pushEntry]);
+
+  const clearLocal = () => {
+    seenIds.current = new Set();
+    setEntries([]);
+  };
+
+  const downloadLog = () => {
+    const txt = entries
+      .map((e) => `[${formatClock(e.created_at)}] [${e.level.toUpperCase()}] [${e.source}] ${e.message}`)
+      .join("\n");
+    const blob = new Blob([txt], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `execution-log-${caseId.slice(0, 8)}.log`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const counts = useMemo(() => {
+    const c = { total: entries.length, success: 0, warn: 0, error: 0 };
+    for (const e of entries) {
+      if (e.level === "success") c.success++;
+      else if (e.level === "warn") c.warn++;
+      else if (e.level === "error") c.error++;
+    }
+    return c;
+  }, [entries]);
 
   return (
-    <div className="space-y-6">
-      {/* Control Bar & Progress */}
+    <div className="space-y-4">
+      {/* Control Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 p-5 rounded-3xl border border-white/90 bg-white/75 backdrop-blur-xl shadow-sm">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-600">
@@ -130,122 +255,138 @@ export default function LiveExecution({ caseId, onCrossCaseMatch }: { caseId: st
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="font-bold text-slate-900">LangGraph Agent Pipeline</h3>
-              {wsConnected && (
-                <Badge variant="low" className="text-[10px] px-2 py-0">
-                  WS LIVE
+              <h3 className="font-bold text-slate-900">Pipeline Execution Stream</h3>
+              {wsConnected ? (
+                <Badge variant="low" className="text-[10px] px-2 py-0 flex items-center gap-1">
+                  <Radio className="w-2.5 h-2.5" />
+                  LIVE
+                </Badge>
+              ) : (
+                <Badge variant="medium" className="text-[10px] px-2 py-0">
+                  OFFLINE
                 </Badge>
               )}
             </div>
             <p className="text-xs text-slate-500">
-              Parallel execution topology across 8 forensic AI agents
+              Real events from ingestion, extraction, Qdrant & Neo4j — streamed over WebSocket, persisted per case.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="w-48 bg-slate-100 rounded-full h-3 overflow-hidden border border-slate-200/60 p-0.5">
-            <div
-              className="bg-gradient-to-r from-indigo-500 to-cyan-500 h-full rounded-full transition-all duration-500"
-              style={{ width: `${progressPercent}%` }}
-            />
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 text-[11px] font-semibold">
+            <span className="text-slate-500">
+              {counts.total} events
+            </span>
+            {counts.success > 0 && (
+              <span className="text-emerald-600">{counts.success} ok</span>
+            )}
+            {counts.warn > 0 && (
+              <span className="text-amber-600">{counts.warn} warn</span>
+            )}
+            {counts.error > 0 && (
+              <span className="text-rose-600">{counts.error} err</span>
+            )}
           </div>
-          <span className="text-xs font-bold text-slate-700 w-10">{progressPercent}%</span>
 
           <button
-            onClick={triggerExecution}
-            disabled={isExecuting}
-            className={`px-5 py-2.5 rounded-full font-semibold text-xs transition-all flex items-center gap-2 ${isExecuting
-              ? "bg-slate-200 text-slate-400 cursor-not-allowed"
-              : "bg-slate-900 hover:bg-slate-800 text-white shadow-md shadow-slate-900/10"
-              }`}
+            onClick={refresh}
+            disabled={loading || isPlaceholder}
+            className="px-3 py-2 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+            title="Reload history from database"
           >
-            {isExecuting ? (
-              <>
-                <RotateCcw className="w-3.5 h-3.5 animate-spin" />
-                Executing...
-              </>
-            ) : (
-              <>
-                <Play className="w-3.5 h-3.5 fill-current" />
-                Run Pipeline
-              </>
-            )}
+            <RotateCcw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            Reload
+          </button>
+
+          <button
+            onClick={downloadLog}
+            disabled={entries.length === 0}
+            className="px-3 py-2 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+            title="Download log as .log file"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Export
+          </button>
+
+          <button
+            onClick={clearLocal}
+            disabled={entries.length === 0}
+            className="px-3 py-2 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+            title="Clear view (does not delete stored history)"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Clear view
           </button>
         </div>
       </div>
 
-      {/* Agents Timeline Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {agents.map((agent, index) => {
-          const isDone = agent.status === "completed";
-          const isRunning = agent.status === "running";
-
-          return (
-            <div
-              key={agent.id}
-              className={`p-5 rounded-3xl border transition-all duration-300 ${isRunning
-                ? "border-indigo-400 bg-indigo-50/60 shadow-md shadow-indigo-500/10 ring-2 ring-indigo-400/30"
-                : isDone
-                  ? "border-emerald-200/80 bg-emerald-50/40"
-                  : "border-white/80 bg-white/70 shadow-sm"
-                }`}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Step 0{index + 1} • {agent.category}
-                </span>
-                {isDone && <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
-                {isRunning && <Activity className="w-4 h-4 text-indigo-600 animate-spin" />}
-              </div>
-
-              <h4 className="font-bold text-sm text-slate-900 mb-1">{agent.name}</h4>
-
-              <div className="min-h-[44px]">
-                {agent.details ? (
-                  <p className="text-xs text-slate-600 leading-relaxed">{agent.details}</p>
-                ) : (
-                  <p className="text-xs text-slate-400 italic">Awaiting execution trigger...</p>
-                )}
-              </div>
-
-              {/* Specific Badge Badges */}
-              <div className="mt-3 flex flex-wrap gap-1.5 pt-2 border-t border-slate-100">
-                {agent.flagsCount !== undefined && (
-                  <Badge variant="high" className="text-[10px]">
-                    {agent.flagsCount} Flags
-                  </Badge>
-                )}
-                {agent.syntheticProb !== undefined && (
-                  <Badge variant="critical" className="text-[10px]">
-                    {Math.round(agent.syntheticProb * 100)}% Synthetic
-                  </Badge>
-                )}
-                {agent.riskScore !== undefined && (
-                  <Badge variant="critical" className="text-[10px]">
-                    Score: {agent.riskScore}
-                  </Badge>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Execution Terminal Output Log */}
-      <div className="p-4 rounded-3xl border border-slate-200/80 bg-slate-900 text-slate-200 font-mono text-xs shadow-inner max-h-36 overflow-y-auto">
-        <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 text-[11px] text-slate-400">
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            Execution Console Output
-          </span>
-          <span>WebSocket Stream</span>
+      {error && (
+        <div className="px-4 py-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
+          {error}
         </div>
-        {executionLog.map((log, i) => (
-          <p key={i} className="py-0.5 text-slate-300 leading-relaxed">
-            {log}
-          </p>
-        ))}
+      )}
+
+      {/* Terminal pane */}
+      <div className="rounded-3xl border border-slate-800 bg-[#0b0f1a] shadow-inner overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2 bg-[#0e1422] border-b border-slate-800 text-[11px] text-slate-400">
+          <span className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${wsConnected ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
+            Execution Console — case {isPlaceholder ? "—" : `${caseId.slice(0, 8)}…`}
+          </span>
+          <span className="flex items-center gap-2">
+            <Activity className="w-3 h-3" />
+            {isPlaceholder
+              ? "Select a case from the workspace to attach the live stream"
+              : autoScroll ? "auto-scroll on" : "auto-scroll paused"}
+          </span>
+        </div>
+
+        <div
+          ref={terminalRef}
+          onScroll={handleScroll}
+          className="font-mono text-[12px] leading-[1.55] text-slate-200 p-4 h-[420px] overflow-y-auto"
+        >
+          {isPlaceholder ? (
+            <p className="text-slate-500 italic">
+              No case selected. Open a case workspace to view its execution timeline.
+            </p>
+          ) : loading && entries.length === 0 ? (
+            <p className="text-slate-500 italic">Loading execution history for this case…</p>
+          ) : entries.length === 0 ? (
+            <p className="text-slate-500 italic">
+              No events yet. Upload evidence to this case and the real pipeline logs will stream in here.
+            </p>
+          ) : (
+            entries.map((e, i) => (
+              <div
+                key={e.id || `${i}-${e.created_at}`}
+                className="flex items-start gap-3 py-[2px] border-b border-slate-800/40 last:border-b-0"
+              >
+                <span className="shrink-0 text-slate-500 text-[11px] tabular-nums w-24">
+                  {formatClock(e.created_at)}
+                </span>
+                <span
+                  className={`shrink-0 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${sourceBadgeClass(e.source)}`}
+                  title={`source: ${e.source}`}
+                >
+                  {e.source}
+                </span>
+                <span className={`shrink-0 text-[10px] font-bold uppercase w-14 ${levelClass(e.level)}`}>
+                  {e.level}
+                </span>
+                <span className={`flex-1 break-words ${levelClass(e.level)}`}>
+                  {e.message}
+                  {e.evidence_id && (
+                    <span className="text-slate-500 ml-2">
+                      · ev={e.evidence_id.slice(0, 8)}…
+                    </span>
+                  )}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );
